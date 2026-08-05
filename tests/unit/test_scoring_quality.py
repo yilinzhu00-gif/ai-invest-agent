@@ -23,6 +23,18 @@ DEMO_METRICS = {
 
 
 class EvaluateScoreQualityTests(unittest.TestCase):
+    def test_empty_metrics_are_insufficient_and_hide_the_rating(self) -> None:
+        """An empty payload cannot provide coverage for any core dimension."""
+        evaluation = scoring.evaluate_score({})
+
+        self.assertEqual(evaluation["status"], "insufficient_data")
+        self.assertAlmostEqual(evaluation["coverage"], 0.0)
+        self.assertEqual(
+            evaluation["missing_core_dimensions"],
+            ["valuation", "profit", "growth", "health"],
+        )
+        self.assertIsNone(evaluation["result"])
+
     def test_single_metric_is_insufficient_and_hides_the_rating(self) -> None:
         """Removing core-dimension data must prevent a partial valuation rating."""
         evaluation = scoring.evaluate_score({"pe_ttm": 10})
@@ -48,13 +60,17 @@ class EvaluateScoreQualityTests(unittest.TestCase):
             "pe_ttm": math.nan,
             "pb": math.inf,
             "roe": "not-a-number",
-            "net_margin": None,
+        "net_margin": None,
+        "profit_growth": -math.inf,
         }
         evaluation = scoring.evaluate_score(metrics)
 
         self.assertEqual(evaluation["status"], "insufficient_data")
-        self.assertAlmostEqual(evaluation["coverage"], 0.6125)
-        self.assertTrue({"pe_ttm", "pb", "roe", "net_margin"} <= set(evaluation["missing_metrics"]))
+        self.assertAlmostEqual(evaluation["coverage"], 0.4875)
+        self.assertTrue(
+            {"pe_ttm", "pb", "roe", "net_margin", "profit_growth"}
+            <= set(evaluation["missing_metrics"])
+        )
         self.assertIn("valuation", evaluation["missing_core_dimensions"])
         self.assertNotIn("profit", evaluation["missing_core_dimensions"])
         self.assertIsNone(evaluation["result"])

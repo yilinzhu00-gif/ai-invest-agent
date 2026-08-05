@@ -30,6 +30,9 @@ target-version = "py312"
 line-length = 100
 src = ["."]
 
+[tool.ruff.lint]
+ignore = ["RUF007"]
+
 [tool.mypy]
 python_version = "3.12"
 

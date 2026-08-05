@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from itertools import pairwise
 from typing import Any, Literal, TypedDict
 
 
@@ -98,7 +97,7 @@ def _interp(value: float, anchors: list[tuple[float, float]]) -> float:
         return a[0][1]
     if value >= a[-1][0]:
         return a[-1][1]
-    for (v0, s0), (v1, s1) in pairwise(a):
+    for (v0, s0), (v1, s1) in zip(a, a[1:]):
         if v0 <= value <= v1:
             t = (value - v0) / (v1 - v0) if v1 != v0 else 0
             return s0 + t * (s1 - s0)
