@@ -35,10 +35,14 @@ class ScoringEvaluationRequest(BaseModel):
                 normalized[key] = None
             elif isinstance(metric_value, bool) or not isinstance(metric_value, (int, float)):
                 raise ValueError("metric values must be JSON numbers or null")
-            elif not math.isfinite(metric_value):
-                raise ValueError("metric values must be finite")
             else:
-                normalized[key] = float(metric_value)
+                try:
+                    metric_number = float(metric_value)
+                except OverflowError:
+                    raise ValueError("metric values must be finite") from None
+                if not math.isfinite(metric_number):
+                    raise ValueError("metric values must be finite")
+                normalized[key] = metric_number
         return normalized
 
 

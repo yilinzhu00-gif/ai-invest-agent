@@ -64,6 +64,17 @@ class EvaluateScoreQualityTests(unittest.TestCase):
         self.assertEqual(pe_metric["value"], 18.5)
         self.assertIsInstance(pe_metric["value"], float)
 
+    def test_huge_integer_is_excluded_without_raising(self) -> None:
+        """Overflowing a float conversion must not crash the compatibility quality gate."""
+        evaluation = scoring.evaluate_score(DEMO_METRICS | {"pe_ttm": 10**1000})
+
+        self.assertEqual(evaluation["status"], "ok")
+        self.assertAlmostEqual(evaluation["coverage"], 0.88)
+        self.assertIn("pe_ttm", evaluation["missing_metrics"])
+        assert evaluation["result"] is not None
+        valuation_metrics = evaluation["result"]["dimensions"][0]["metrics"]
+        self.assertEqual([metric["name"] for metric in valuation_metrics], ["市净率 PB"])
+
     def test_invalid_values_are_reported_and_excluded_from_coverage(self) -> None:
         """NaN, infinity, strings, and None must not be treated as score inputs."""
         metrics = DEMO_METRICS | {

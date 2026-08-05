@@ -160,6 +160,21 @@ def test_metric_values_reject_non_numeric_json_types(
     }
 
 
+def test_huge_integer_metric_returns_correlated_validation_error(client: TestClient) -> None:
+    """A JSON integer outside float range must be a common 422, never an internal error."""
+    response = client.post(
+        "/api/v1/scoring/evaluate",
+        json=_payload({"pe_ttm": 10**1000}),
+        headers={"X-Correlation-ID": "huge-integer-123"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "error": {"code": "validation_error"},
+        "correlation_id": "huge-integer-123",
+    }
+
+
 def test_declared_oversized_body_returns_correlated_413() -> None:
     """Trusting a declared body over the limit would allow avoidable memory pressure."""
     app = create_app(Settings(max_request_body_bytes=128))

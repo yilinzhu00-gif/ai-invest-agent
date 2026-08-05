@@ -152,14 +152,15 @@ def score_stock(metrics: dict[str, Any]) -> dict[str, Any]:
     return {"total": total, "grade": grade, "label": label, "dimensions": dims_out}
 
 
-def _is_valid_metric_value(value: Any) -> bool:
-    """Return whether a value can safely participate in numeric scoring."""
+def _normalize_metric_value(value: Any) -> float | None:
+    """Return a finite numeric metric or ``None`` when it cannot be scored."""
     if value is None or isinstance(value, bool):
-        return False
+        return None
     try:
-        return math.isfinite(float(value))
-    except (TypeError, ValueError):
-        return False
+        normalized = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return normalized if math.isfinite(normalized) else None
 
 
 def evaluate_score(metrics: dict[str, Any]) -> ScoreEvaluation:
@@ -178,11 +179,11 @@ def evaluate_score(metrics: dict[str, Any]) -> ScoreEvaluation:
         dimension_has_valid_metric = False
         for metric in dimension.metrics:
             value = metrics.get(metric.key)
-            if not _is_valid_metric_value(value):
+            normalized = _normalize_metric_value(value)
+            if normalized is None:
                 missing_metrics.append(metric.key)
                 continue
-            assert value is not None
-            valid_metrics[metric.key] = float(value)
+            valid_metrics[metric.key] = normalized
             coverage += dimension.weight * metric.weight
             dimension_has_valid_metric = True
         if dimension.key in CORE_DIMENSIONS and not dimension_has_valid_metric:
