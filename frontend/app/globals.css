@@ -1,0 +1,18 @@
+:root { color-scheme: light; font-family: Arial, "PingFang SC", sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f5f7fa; color: #18212f; }
+button, input { font: inherit; }
+button, .button-link { background: #0c5db1; border: 0; border-radius: 4px; color: #fff; cursor: pointer; display: inline-block; padding: 0.65rem 1rem; text-decoration: none; }
+button:disabled { cursor: wait; opacity: 0.7; }
+.page-shell { margin: 0 auto; max-width: 960px; padding: 2rem 1rem 3rem; }
+.disclaimer { background: #fff4d6; border-left: 4px solid #b7791f; padding: 0.8rem; }
+.scoring-form { background: #fff; border: 1px solid #d6dce5; border-radius: 8px; padding: 1rem; }
+.form-grid { display: grid; gap: 0.8rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin: 0.75rem 0; }
+.form-grid--base { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+label { display: grid; font-weight: 600; gap: 0.3rem; }
+input { border: 1px solid #8d99a8; border-radius: 4px; padding: 0.45rem; }
+fieldset { border: 1px solid #d6dce5; margin: 1rem 0; }
+.result-card, .error-card { background: #fff; border-radius: 8px; margin-top: 1rem; padding: 1rem; }
+.error-card { border-left: 4px solid #b42318; }
+.total strong { font-size: 2rem; }
+.dimension { border-top: 1px solid #d6dce5; padding-top: 0.4rem; }
