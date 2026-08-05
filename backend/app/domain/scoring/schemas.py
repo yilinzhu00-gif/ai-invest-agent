@@ -1,3 +1,4 @@
+import math
 import re
 from datetime import date
 from typing import Annotated, Any, Literal
@@ -13,7 +14,7 @@ class ScoringEvaluationRequest(BaseModel):
 
     symbol: StockSymbol
     as_of_date: date
-    metrics: dict[str, Any] = Field(max_length=100)
+    metrics: dict[str, float | None] = Field(max_length=100)
 
     @field_validator("as_of_date", mode="before")
     @classmethod
@@ -21,6 +22,24 @@ class ScoringEvaluationRequest(BaseModel):
         if not isinstance(value, str) or ISO_DATE_PATTERN.fullmatch(value) is None:
             raise ValueError("as_of_date must be a YYYY-MM-DD date string")
         return value
+
+    @field_validator("metrics", mode="before")
+    @classmethod
+    def require_strict_finite_metric_numbers(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+
+        normalized: dict[str, float | None] = {}
+        for key, metric_value in value.items():
+            if metric_value is None:
+                normalized[key] = None
+            elif isinstance(metric_value, bool) or not isinstance(metric_value, (int, float)):
+                raise ValueError("metric values must be JSON numbers or null")
+            elif not math.isfinite(metric_value):
+                raise ValueError("metric values must be finite")
+            else:
+                normalized[key] = float(metric_value)
+        return normalized
 
 
 class ScoringEvaluationResponse(BaseModel):

@@ -1,5 +1,3 @@
-from typing import Any
-
 from backend.app.domain.scoring.schemas import ScoringEvaluationResponse
 from scoring import evaluate_score
 
@@ -7,7 +5,7 @@ from scoring import evaluate_score
 class ScoringService:
     """Adapt the established root scorer to the HTTP domain contract."""
 
-    def evaluate(self, metrics: dict[str, Any]) -> ScoringEvaluationResponse:
+    def evaluate(self, metrics: dict[str, float | None]) -> ScoringEvaluationResponse:
         return ScoringEvaluationResponse.model_validate(evaluate_score(metrics))
 
 

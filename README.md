@@ -59,7 +59,8 @@ uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 npm --prefix frontend run dev
 ```
 
-打开 <http://127.0.0.1:3000/scoring>。
+打开 <http://localhost:3000/scoring>。默认 API CORS 来源也是
+`http://localhost:3000`，请勿混用 `127.0.0.1` 作为前端地址。
 
 Streamlit 兼容界面仅在需要旧功能时启动。复制 `.env.example` 为本地 `.env` 后填入自己的模型配置；切勿提交该文件或任何真实凭据：
 

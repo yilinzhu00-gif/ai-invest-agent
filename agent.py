@@ -62,12 +62,12 @@ def get_market_snapshot(code: str) -> str:
 @tool
 def score_stock(code: str) -> dict:
     """对 A 股个股做多维度量化打分（估值/盈利能力/成长性/财务健康/动量），
-    返回综合分、评级、以及各维度的指标明细。参数 code 为 6 位股票代码。"""
+    数据充分时返回综合分与评级，数据不足时只返回覆盖诊断。参数 code 为 6 位股票代码。"""
     try:
         metrics = finance.get_metrics(code)
         if not metrics:
             return {"error": f"未取到 {code} 的任何指标，请确认代码是否正确或稍后重试。"}
-        return scoring.score_stock(metrics)
+        return scoring.evaluate_score(metrics)
     except Exception as error:
         logger.debug("Scoring tool failed", exc_info=True)
         return {"error": f"评分失败，可稍后重试：{error}"}

@@ -54,6 +54,16 @@ class EvaluateScoreQualityTests(unittest.TestCase):
         self.assertEqual(evaluation["missing_metrics"], [])
         self.assertIsNotNone(evaluation["result"])
 
+    def test_compatible_numeric_strings_are_normalized_in_result_details(self) -> None:
+        """Keeping a numeric string in metric detail would violate JSON client contracts."""
+        evaluation = scoring.evaluate_score(DEMO_METRICS | {"pe_ttm": "18.5"})
+
+        self.assertEqual(evaluation["status"], "ok")
+        assert evaluation["result"] is not None
+        pe_metric = evaluation["result"]["dimensions"][0]["metrics"][0]
+        self.assertEqual(pe_metric["value"], 18.5)
+        self.assertIsInstance(pe_metric["value"], float)
+
     def test_invalid_values_are_reported_and_excluded_from_coverage(self) -> None:
         """NaN, infinity, strings, and None must not be treated as score inputs."""
         metrics = DEMO_METRICS | {

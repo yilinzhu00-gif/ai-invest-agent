@@ -7,6 +7,7 @@ from backend.app.core.config import Settings
 from backend.app.core.errors import (
     CorrelatedCORSMiddleware,
     CorrelationIdMiddleware,
+    RequestBodyLimitMiddleware,
     http_exception_handler,
     request_validation_exception_handler,
     unexpected_exception_handler,
@@ -21,6 +22,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = current_settings
     app.state.db_engine = None
     app.state.db_session_factory = None
+    app.add_middleware(
+        RequestBodyLimitMiddleware,
+        max_body_bytes=current_settings.max_request_body_bytes,
+    )
     app.add_middleware(CorrelationIdMiddleware)
     app.add_middleware(
         CorrelatedCORSMiddleware,

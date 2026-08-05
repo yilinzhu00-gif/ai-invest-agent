@@ -105,36 +105,47 @@ with tab4:
             if not metrics:
                 st.error("没拿到任何指标，检查股票代码是否正确，或稍后重试。")
             else:
-                result = scoring.score_stock(metrics)
+                evaluation = scoring.evaluate_score(metrics)
+                if evaluation["status"] == "insufficient_data":
+                    st.warning("数据覆盖不足，暂不提供评分或 AI 评价。")
+                    st.write(f"覆盖率：{evaluation['coverage']:.0%}")
+                    st.write(
+                        "缺失核心维度："
+                        + "、".join(evaluation["missing_core_dimensions"])
+                    )
+                    st.write("缺失指标：" + "、".join(evaluation["missing_metrics"]))
+                else:
+                    result = evaluation["result"]
+                    assert result is not None
 
-                # —— 综合评分 ——
-                c1, c2 = st.columns([1, 2])
-                c1.metric("综合评分", f"{result['total']}",
-                          f"{result['grade']} · {result['label']}")
-                c2.progress(result["total"] / 100)
+                    # —— 综合评分 ——
+                    c1, c2 = st.columns([1, 2])
+                    c1.metric("综合评分", f"{result['total']}",
+                              f"{result['grade']} · {result['label']}")
+                    c2.progress(result["total"] / 100)
 
-                # —— 各维度（对标 RAG 的「查看检索片段」：每项凭啥打分都摊开）——
-                for d in result["dimensions"]:
-                    st.write(f"**{d['name']}** — {d['score']} 分"
-                             f"（权重 {d['weight_norm']}，贡献 {d['contribution']}）")
-                    st.progress(d["score"] / 100)
-                    with st.expander(f"查看「{d['name']}」评分依据"):
-                        st.table([{
-                            "指标": mm["name"],
-                            "原始值": mm["value"],
-                            "得分": mm["subscore"],
-                            "维度内权重": mm["weight_norm"],
-                        } for mm in d["metrics"]])
+                    # —— 各维度（每项评分依据都展开）——
+                    for d in result["dimensions"]:
+                        st.write(f"**{d['name']}** — {d['score']} 分"
+                                 f"（权重 {d['weight_norm']}，贡献 {d['contribution']}）")
+                        st.progress(d["score"] / 100)
+                        with st.expander(f"查看「{d['name']}」评分依据"):
+                            st.table([{
+                                "指标": mm["name"],
+                                "原始值": mm["value"],
+                                "得分": mm["subscore"],
+                                "维度内权重": mm["weight_norm"],
+                            } for mm in d["metrics"]])
 
-                # —— LLM 评价（复用项目已配好的 DeepSeek 客户端）——
-                with st.spinner("AI 生成投资评价中…"):
-                    st.markdown("### 📝 投资评价")
-                    st.markdown(scoring.explain_score(
-                        result, llm._chat_client, name=s_code, model=llm.CHAT_MODEL
-                    ))
+                    # —— LLM 评价（仅在质量门通过后生成）——
+                    with st.spinner("AI 生成投资评价中…"):
+                        st.markdown("### 📝 投资评价")
+                        st.markdown(scoring.explain_score(
+                            result, llm._chat_client, name=s_code, model=llm.CHAT_MODEL
+                        ))
 
-                st.info("⚠️ 以上为基于公开数据的量化打分与 AI 点评，仅供学习参考，"
-                        "不构成任何投资建议。")
+                    st.info("⚠️ 以上为基于公开数据的量化打分与 AI 点评，仅供学习参考，"
+                            "不构成任何投资建议。")
         except Exception as error:
             logger.debug("Structured scoring failed", exc_info=True)
             st.error(f"出错了：{error}")

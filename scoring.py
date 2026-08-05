@@ -181,7 +181,8 @@ def evaluate_score(metrics: dict[str, Any]) -> ScoreEvaluation:
             if not _is_valid_metric_value(value):
                 missing_metrics.append(metric.key)
                 continue
-            valid_metrics[metric.key] = value
+            assert value is not None
+            valid_metrics[metric.key] = float(value)
             coverage += dimension.weight * metric.weight
             dimension_has_valid_metric = True
         if dimension.key in CORE_DIMENSIONS and not dimension_has_valid_metric:

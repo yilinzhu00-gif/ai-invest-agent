@@ -5,7 +5,9 @@
 项目正在从单体 Streamlit 学习应用过渡为可独立演进的 API 与 Web 评分切片。以下组件已实现：
 
 ```text
-Streamlit app.py / LangGraph agent.py ──> finance + scoring.score_stock (legacy compatibility)
+Streamlit app.py / LangGraph agent.py ──> finance + scoring.evaluate_score
+                                                    │
+                                      legacy scoring.score_stock internally
 
 Next.js /scoring ──POST /api/v1/scoring/evaluate──> FastAPI ──> scoring.evaluate_score
                                                         │
@@ -16,9 +18,14 @@ Next.js /scoring ──POST /api/v1/scoring/evaluate──> FastAPI ──> scor
                                              Alembic app_metadata baseline
 ```
 
-- **Streamlit 兼容路径**：根目录 `app.py` 和 `agent.py` 仍提供旧的行情、LLM、RAG 与 `scoring.score_stock()` 调用方。它们是与 FastAPI 评分切片并存的 legacy 路径，可以读取本地模型配置，因而不是 API/前端离线测试的依赖。
+- **Streamlit 兼容路径**：根目录 `app.py` 和 `agent.py` 仍提供旧的行情、LLM 与 RAG
+  界面，但评分调用已迁移到 `scoring.evaluate_score()`，数据不足时不显示评级，也不生成
+  LLM 评分解释。它们可以读取本地模型配置，因而不是 API/前端离线测试的依赖。
 - **FastAPI**：`backend.app.main:create_app` 暴露 `/api/v1` 健康检查和评分 API，负责 CORS、关联 ID 与安全错误信封。
-- **评分领域适配层**：`backend/app/domain/scoring` 仅适配根目录的 `scoring.evaluate_score()`；没有复制或更改既有评分规则。它不调用 legacy `score_stock()`。数据不足时返回 `insufficient_data`，不暴露评级。
+- **评分领域适配层**：`backend/app/domain/scoring` 仅适配根目录的
+  `scoring.evaluate_score()`，没有复制或更改既有评分规则。`evaluate_score()` 在质量门通过后
+  会在内部调用 legacy `score_stock()`；新的 API、Streamlit 和 LangGraph 调用方均不再直接
+  调用它。数据不足时返回 `insufficient_data`，不暴露评级。
 - **Next.js**：`frontend/` 仅实现评分表单和结果显示。客户端超时/取消/错误处理位于 API client；评分算法不在浏览器执行。
 - **PostgreSQL/Alembic**：数据库基础设施是惰性创建的，`/health/ready` 检查连接和当前 Alembic revision。唯一的初始迁移创建 `app_metadata`；API 启动不会迁移数据库。
 - **Compose**：基础拓扑包含 PostgreSQL、一次性 `migrate`、API、前端以及可选 `legacy` Streamlit profile。开发组合发布 `5432/8000/3000`；生产组合不发布 PostgreSQL 端口。

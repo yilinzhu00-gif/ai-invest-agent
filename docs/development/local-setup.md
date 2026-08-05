@@ -71,7 +71,9 @@ uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
 NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 npm --prefix frontend run dev
 ```
 
-打开 `http://127.0.0.1:3000/scoring`。该页面只调用评分 API，不在浏览器中复制评分算法。
+打开 `http://localhost:3000/scoring`。默认 API CORS 来源也是
+`http://localhost:3000`，请勿混用 `127.0.0.1` 作为前端地址。该页面只调用评分 API，
+不在浏览器中复制评分算法。
 
 ### Streamlit 兼容路径
 

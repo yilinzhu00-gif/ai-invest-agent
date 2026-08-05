@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     db_pool_size: int = 5
     db_max_overflow: int = 10
     db_connect_timeout: float = 5.0
+    max_request_body_bytes: int = Field(default=64 * 1024, gt=0)
 
     @model_validator(mode="after")
     def require_database_url_in_production(self) -> "Settings":

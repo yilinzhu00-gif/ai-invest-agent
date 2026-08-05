@@ -27,7 +27,11 @@ API 基础前缀为 `/api/v1`。当前没有认证端点或访问控制；不要
 
 ### `POST /api/v1/scoring/evaluate`
 
-请求体只接受 `symbol`、`as_of_date` 和 `metrics`，不允许额外字段。`symbol` 是 6 位 ASCII 数字，`as_of_date` 是严格的 `YYYY-MM-DD` 日历日期，`metrics` 最多包含 100 项。
+请求体只接受 `symbol`、`as_of_date` 和 `metrics`，不允许额外字段。`symbol` 是 6 位
+ASCII 数字，`as_of_date` 是严格的 `YYYY-MM-DD` 日历日期，`metrics` 最多包含 100 项。
+每个指标值必须是有限 JSON 数字或显式 `null`；字符串、布尔值、对象和数组均返回
+`422 validation_error`。默认最大请求体为 64 KiB，声明长度或流式接收超过上限都会返回
+`413 request_body_too_large`。
 
 ```json
 {
@@ -113,6 +117,7 @@ API 基础前缀为 `/api/v1`。当前没有认证端点或访问控制；不要
 | HTTP 状态 | `error.code` | 含义 |
 | --- | --- | --- |
 | 400 | `cors_preflight_rejected` | CORS 预检来源或方法不被允许。 |
+| 413 | `request_body_too_large` | 请求体超过默认 64 KiB 上限。 |
 | 404 或其他 HTTP 错误 | `http_error` | 未匹配的 HTTP 路由/方法。 |
 | 422 | `validation_error` | 请求体不符合评分契约。 |
 | 503 | `database_not_ready` | 数据库未配置、不可用或迁移状态不匹配。 |

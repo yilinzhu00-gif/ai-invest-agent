@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.datastructures import Headers
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,66 @@ class CorrelatedCORSMiddleware(CORSMiddleware):
         response = error_response(400, "cors_preflight_rejected", correlation_id)
         response.headers["X-Correlation-ID"] = correlation_id
         return response
+
+
+class RequestBodyLimitMiddleware:
+    """Reject declared and streamed HTTP bodies before request parsing."""
+
+    def __init__(self, app: ASGIApp, max_body_bytes: int) -> None:
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        content_length = Headers(scope=scope).get("content-length")
+        if content_length is not None:
+            try:
+                if int(content_length) > self.max_body_bytes:
+                    await self._reject(scope, receive, send)
+                    return
+            except ValueError:
+                pass
+
+        body_parts: list[bytes] = []
+        total = 0
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                await self.app(scope, receive, send)
+                return
+            body = message.get("body", b"")
+            total += len(body)
+            if total > self.max_body_bytes:
+                await self._reject(scope, receive, send)
+                return
+            body_parts.append(body)
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay_body() -> Message:
+            nonlocal replayed
+            if replayed:
+                return {"type": "http.disconnect"}
+            replayed = True
+            return {"type": "http.request", "body": b"".join(body_parts), "more_body": False}
+
+        await self.app(scope, replay_body, send)
+
+    async def _reject(self, scope: Scope, receive: Receive, send: Send) -> None:
+        state = scope.setdefault("state", {})
+        correlation_id = state.get("correlation_id")
+        if not isinstance(correlation_id, str) or not correlation_id:
+            correlation_id = Headers(scope=scope).get("X-Correlation-ID", "").strip() or str(
+                uuid4()
+            )
+        response = error_response(413, "request_body_too_large", correlation_id)
+        response.headers["X-Correlation-ID"] = correlation_id
+        await response(scope, receive, send)
 
 
 async def request_validation_exception_handler(
