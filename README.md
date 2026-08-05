@@ -27,7 +27,7 @@ CrewAI/多 Agent、持久化 RAG、worker/队列、认证授权、生产安全�
 
 ```bash
 uv python install 3.12
-uv sync --all-groups
+uv sync --locked --all-groups
 npm --prefix frontend ci
 
 uv run ruff check .

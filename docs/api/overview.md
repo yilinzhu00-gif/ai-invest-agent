@@ -51,13 +51,37 @@ API 基础前缀为 `/api/v1`。当前没有认证端点或访问控制；不要
 
 成功且数据充分时，响应的 `status` 为 `ok`，`result` 包含 `total`、`grade`、`label`、各维度及指标明细。`coverage` 是有效指标权重覆盖率，`missing_core_dimensions` 和 `missing_metrics` 显示质量门诊断。
 
+下例为 `result.dimensions` 的结构节选；数据充分时实际响应会返回每个有效评分维度及其指标明细，而不是空数组。
+
 ```json
 {
   "status": "ok",
   "coverage": 1.0,
   "missing_core_dimensions": [],
   "missing_metrics": [],
-  "result": {"total": 79.9, "grade": "B", "label": "看好", "dimensions": []}
+  "result": {
+    "total": 79.9,
+    "grade": "B",
+    "label": "看好",
+    "dimensions": [
+      {
+        "name": "估值",
+        "score": 77.8,
+        "weight": 0.2,
+        "weight_norm": 0.2,
+        "contribution": 15.6,
+        "metrics": [
+          {
+            "name": "PE(TTM)",
+            "value": 18.5,
+            "subscore": 82.2,
+            "weight": 0.6,
+            "weight_norm": 0.6
+          }
+        ]
+      }
+    ]
+  }
 }
 ```
 

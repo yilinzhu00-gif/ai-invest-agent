@@ -8,8 +8,9 @@ chat 和 embedding 可以分别对接不同的服务：
 所以加这套配置不会影响原本能跑的功能。
 """
 import os
-from openai import OpenAI
+
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 

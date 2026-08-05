@@ -1,7 +1,11 @@
 """金融数据获取与技术指标计算（基于 akshare，数据免费、无需 token）。"""
+import logging
+import time
+
 import akshare as ak
 import pandas as pd
-import time
+
+logger = logging.getLogger(__name__)
 
 
 def get_stock_history(code: str, days: int = 120) -> pd.DataFrame:
@@ -15,8 +19,9 @@ def get_stock_history(code: str, days: int = 120) -> pd.DataFrame:
         try:
             df = ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
             break
-        except Exception as e:
-            last_err = e
+        except Exception as error:
+            logger.debug("Market history fetch failed", exc_info=True)
+            last_err = error
             time.sleep(1)
     else:
         raise last_err
@@ -76,7 +81,7 @@ def get_metrics(code: str) -> dict:
         m["pe_ttm"] = float(last["pe_ttm"])
         m["pb"] = float(last["pb"])
     except Exception:
-        pass
+        logger.debug("Skipping unavailable valuation metrics", exc_info=True)
 
     # --- 财务指标：用「模糊找列」扛 akshare 版本差异 ---
     try:
@@ -103,7 +108,7 @@ def get_metrics(code: str) -> dict:
         m["rev_growth"]    = pick("主营业务收入增长率", "营业总收入", "收入增长")
         m["profit_growth"] = pick("净利润增长率", "净利润同比")
     except Exception:
-        pass
+        logger.debug("Skipping unavailable financial metrics", exc_info=True)
 
     # --- 动量：近 60 日涨跌幅 + 现价相对 MA20 ---
     try:
@@ -114,6 +119,6 @@ def get_metrics(code: str) -> dict:
         ma20 = close.tail(20).mean()
         m["price_vs_ma20"] = round((close.iloc[-1] / ma20 - 1) * 100, 2)
     except Exception:
-        pass
+        logger.debug("Skipping unavailable momentum metrics", exc_info=True)
 
     return {k: v for k, v in m.items() if v is not None}

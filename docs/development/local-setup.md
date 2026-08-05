@@ -33,7 +33,7 @@ npm install --global npm@11.16.0
 
 ```bash
 uv python install 3.12
-uv sync --all-groups
+uv sync --locked --all-groups
 npm --prefix frontend ci
 
 uv run ruff check .
@@ -126,7 +126,7 @@ docker compose --env-file /tmp/investment-agent.dev.env \
 
 | 现象 | 检查方式 |
 | --- | --- |
-| `uv` 使用了错误 Python | 重新执行 `uv python install 3.12` 和 `uv sync --all-groups`。 |
+| `uv` 使用了错误 Python | 重新执行 `uv python install 3.12` 和 `uv sync --locked --all-groups`。 |
 | 前端安装或类型检查失败 | 确认 Node `v24.18.0`、npm `11.16.0`，然后重跑 `npm --prefix frontend ci`。 |
 | API `/ready` 返回 503 | 确认 `DATABASE_URL` 可连接，执行 `alembic upgrade head`，并确认 `alembic_version` 为当前修订。 |
 | API 端口已占用 | 使用其他端口启动 Uvicorn，并相应设置 `NEXT_PUBLIC_API_BASE_URL`。 |

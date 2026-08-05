@@ -11,19 +11,22 @@
 
 单测：  python agent.py
 """
+import logging
 import os
 from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
 import finance
 import scoring
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()  # 和 llm.py 用同一套 .env
 
@@ -51,8 +54,9 @@ def get_market_snapshot(code: str) -> str:
     try:
         df = finance.add_indicators(finance.get_stock_history(code))
         return finance.snapshot_text(df, code)
-    except Exception as e:
-        return f"（行情取数失败，可稍后重试：{e}）"
+    except Exception as error:
+        logger.debug("Market snapshot tool failed", exc_info=True)
+        return f"（行情取数失败，可稍后重试：{error}）"
 
 
 @tool
@@ -64,8 +68,9 @@ def score_stock(code: str) -> dict:
         if not metrics:
             return {"error": f"未取到 {code} 的任何指标，请确认代码是否正确或稍后重试。"}
         return scoring.score_stock(metrics)
-    except Exception as e:
-        return {"error": f"评分失败，可稍后重试：{e}"}
+    except Exception as error:
+        logger.debug("Scoring tool failed", exc_info=True)
+        return {"error": f"评分失败，可稍后重试：{error}"}
 
 
 @tool

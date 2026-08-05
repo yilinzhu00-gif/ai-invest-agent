@@ -3,12 +3,17 @@
 功能：① 个股行情分析  ② 财报/新闻速读  ③ 研报问答 (RAG)  ④ 结构化评分
 运行：streamlit run app.py
 """
+import logging
+
 import streamlit as st
-import llm
+
+import agent
 import finance
+import llm
 import rag
 import scoring
-import agent
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="AI 投研助手", page_icon="📈", layout="wide")
 st.title("📈 AI 投研助手")
@@ -36,8 +41,9 @@ with tab1:
                 )
             st.markdown(analysis)
             st.info("⚠️ 以上为 AI 生成的分析，仅供学习参考，不构成任何投资建议。")
-        except Exception as e:
-            st.error(f"出错了：{e}\n\n"
+        except Exception as error:
+            logger.debug("Market analysis failed", exc_info=True)
+            st.error(f"出错了：{error}\n\n"
                      "提示：akshare 接口偶尔随版本变化，可 `pip install -U akshare`，"
                      "或确认股票代码正确。")
 
@@ -129,8 +135,9 @@ with tab4:
 
                 st.info("⚠️ 以上为基于公开数据的量化打分与 AI 点评，仅供学习参考，"
                         "不构成任何投资建议。")
-        except Exception as e:
-            st.error(f"出错了：{e}")
+        except Exception as error:
+            logger.debug("Structured scoring failed", exc_info=True)
+            st.error(f"出错了：{error}")
 # ---------- 功能 5：Agent 投研（LangGraph 编排）----------
 with tab5:
     st.subheader("提一个投研问题 → Agent 自主调行情/评分/研报 → 产出报告")
