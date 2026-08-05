@@ -23,6 +23,7 @@ def create_database_engine(settings: Settings) -> AsyncEngine:
         pool_pre_ping=True,
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
+        pool_timeout=settings.db_connect_timeout,
         connect_args={"timeout": settings.db_connect_timeout},
     )
 

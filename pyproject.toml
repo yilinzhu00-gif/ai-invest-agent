@@ -18,7 +18,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "pypdf",
     "python-dotenv",
-    "sqlalchemy>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
     "streamlit>=1.30",
     "uvicorn[standard]>=0.34",
 ]
