@@ -6,23 +6,28 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "akshare>=1.12",
+    "fastapi>=0.115",
     "langchain-core>=0.3",
     "langchain-openai>=0.2",
     "langgraph>=0.2",
     "numpy",
     "openai>=1.0",
     "pandas",
+    "pydantic-settings>=2.7",
     "pypdf",
     "python-dotenv",
     "streamlit>=1.30",
+    "uvicorn[standard]>=0.34",
 ]
 
 [dependency-groups]
 dev = [
     "mypy",
     "pytest",
+    "pytest-asyncio",
     "pytest-cov",
     "ruff",
+    "httpx",
 ]
 
 [tool.ruff]

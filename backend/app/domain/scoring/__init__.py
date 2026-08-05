@@ -1,0 +1,1 @@
+"""Scoring domain boundary."""
