@@ -38,6 +38,46 @@ streamlit run app.py
 
 浏览器会自动打开 `http://localhost:8501`。
 
+## Docker Compose（P1-05）
+
+前置条件：已安装 Docker Engine 与 Docker Compose v2；本机端口 `3000`、`5432`、`8000`
+未被占用。容器构建使用 Python `3.12.11`、根目录已提交的 `uv.lock`，以及 Node
+`24.18.0`、`frontend/package-lock.json`；请勿将真实凭据写入仓库、镜像或示例文件。
+
+本地开发请先把模板复制到仓库外的安全位置并按需修改；示例中的数据库密码仅用于本地，
+不可用于生产：
+
+```bash
+cp deploy/env/development.example /tmp/investment-agent.dev.env
+docker compose --env-file /tmp/investment-agent.dev.env \
+  -f deploy/compose.base.yml -f deploy/compose.dev.yml up --build
+```
+
+开发组合会发布 API `8000`、前端 `3000` 和 PostgreSQL `5432`。Compose 会先等待
+PostgreSQL 健康检查，再运行一次 `alembic upgrade head`；仅迁移成功后才启动 API，
+API 健康检查为 `/api/v1/health/ready`。停止服务可执行：
+
+```bash
+docker compose --env-file /tmp/investment-agent.dev.env \
+  -f deploy/compose.base.yml -f deploy/compose.dev.yml down
+```
+
+生产组合不将 PostgreSQL 端口发布到主机。请由密钥管理系统生成生产环境文件，使用
+`deploy/env/production.example` 的变量名（而不是其占位符），然后运行：
+
+```bash
+docker compose --env-file /secure/path/investment-agent.prod.env \
+  -f deploy/compose.base.yml -f deploy/compose.prod.yml up -d --build
+```
+
+旧版 Streamlit 仅作为可选兼容 profile，不会默认启动；它仍可能需要通过运行时环境变量
+提供模型凭据，切勿把凭据写入 Compose 文件。开发环境可按需追加：
+
+```bash
+docker compose --profile legacy --env-file /tmp/investment-agent.dev.env \
+  -f deploy/compose.base.yml -f deploy/compose.dev.yml up --build
+```
+
 ## 评分数据质量门
 
 `scoring.py` 提供两种评分入口：现有 Streamlit 和 LangGraph 路径在迁移期间继续

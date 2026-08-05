@@ -1,0 +1,9 @@
+# Copy to a local file outside version control, then pass it with --env-file.
+# These values are for local Docker Compose development only.
+APP_ENV=development
+POSTGRES_DB=investment_agent
+POSTGRES_USER=investment_agent
+POSTGRES_PASSWORD=change-me-development-only
+DATABASE_URL=postgresql://investment_agent:change-me-development-only@postgres:5432/investment_agent
+CORS_ORIGINS=http://localhost:3000
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000

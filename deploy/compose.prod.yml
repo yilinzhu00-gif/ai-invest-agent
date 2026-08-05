@@ -1,0 +1,15 @@
+services:
+  api:
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+    ports:
+      - "8000:8000"
+
+  frontend:
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+
+  postgres:
+    restart: unless-stopped
