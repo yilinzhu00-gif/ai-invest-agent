@@ -4,7 +4,9 @@ from uuid import uuid4
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, Response
+from starlette.datastructures import Headers
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,20 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         correlation_id = provided_id or str(uuid4())
         request.state.correlation_id = correlation_id
         response = await call_next(request)
+        response.headers["X-Correlation-ID"] = correlation_id
+        return response
+
+
+class CorrelatedCORSMiddleware(CORSMiddleware):
+    """Return the API error envelope when CORS rejects a preflight request."""
+
+    def preflight_response(self, request_headers: Headers) -> Response:
+        response = super().preflight_response(request_headers)
+        if response.status_code < 400:
+            return response
+
+        correlation_id = request_headers.get("X-Correlation-ID", "").strip() or str(uuid4())
+        response = error_response(400, "cors_preflight_rejected", correlation_id)
         response.headers["X-Correlation-ID"] = correlation_id
         return response
 

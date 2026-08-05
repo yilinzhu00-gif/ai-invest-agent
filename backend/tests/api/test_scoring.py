@@ -58,11 +58,34 @@ def test_evaluate_with_single_metric_hides_score_details(client: TestClient) -> 
     assert "label" not in body
 
 
+def test_disallowed_cors_preflight_returns_a_correlated_error_envelope(client: TestClient) -> None:
+    """Returning Starlette's plain-text preflight rejection must break this contract."""
+    response = client.options(
+        "/api/v1/scoring/evaluate",
+        headers={
+            "Origin": "https://untrusted.example",
+            "Access-Control-Request-Method": "POST",
+            "X-Correlation-ID": "cors-request-123",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.headers["X-Correlation-ID"] == "cors-request-123"
+    assert response.json() == {
+        "error": {"code": "cors_preflight_rejected"},
+        "correlation_id": "cors-request-123",
+    }
+
+
 @pytest.mark.parametrize(
     ("payload", "expected_status"),
     [
         ({"symbol": "600519", "as_of_date": "not-a-date", "metrics": {}}, 422),
         ({"symbol": "ABC123", "as_of_date": "2026-08-05", "metrics": {}}, 422),
+        ({"symbol": "６００５１９", "as_of_date": "2026-08-05", "metrics": {}}, 422),
+        ({"symbol": "٦٠٠٥١٩", "as_of_date": "2026-08-05", "metrics": {}}, 422),
+        ({"symbol": "600519", "as_of_date": 20260805, "metrics": {}}, 422),
+        ({"symbol": "600519", "as_of_date": "2026-08-05T00:00:00", "metrics": {}}, 422),
         (
             {
                 "symbol": "600519",
