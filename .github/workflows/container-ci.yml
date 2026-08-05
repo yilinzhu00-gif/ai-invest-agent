@@ -1,0 +1,47 @@
+name: Container CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/Dockerfile"
+      - "frontend/Dockerfile"
+      - ".dockerignore"
+      - "backend/**"
+      - "frontend/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "scoring.py"
+      - "agent.py"
+      - "app.py"
+      - "finance.py"
+      - "llm.py"
+      - "rag.py"
+      - ".github/workflows/container-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/Dockerfile"
+      - "frontend/Dockerfile"
+      - ".dockerignore"
+      - "backend/**"
+      - "frontend/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "scoring.py"
+      - "agent.py"
+      - "app.py"
+      - "finance.py"
+      - "llm.py"
+      - "rag.py"
+      - ".github/workflows/container-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: docker build --tag investment-agent-backend:ci --file backend/Dockerfile .
+      - run: docker build --tag investment-agent-frontend:ci --file frontend/Dockerfile .

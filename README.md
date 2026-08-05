@@ -1,51 +1,84 @@
-# 📈 AI 投研助手 (AI Investment Copilot)
+# AI 投研助手（AI Investment Copilot）
 
-一个面向个人投资者与金融学习者的 **AI 投研助手**，集成大语言模型（LLM）与检索增强生成（RAG），实现个股行情解读、财报/新闻速读、研报智能问答三大功能。
+面向个人投资者与金融学习者的研究辅助项目。当前处于从原有 Streamlit 学习应用向 FastAPI 评分 API、Next.js 评分页面与 PostgreSQL/Alembic 基线过渡的阶段。
 
-> 本项目从一个 Coze 无代码理财科普 Agent 升级而来，目标是用代码完整实现一套「数据 → LLM 分析 → RAG 问答」的 AI 应用闭环。
+> 本项目仅用于技术学习和研究辅助；所有输出均不构成投资建议，不保证数据完整性、及时性或收益，任何交易决定和风险由使用者自行承担。
 
----
+## 当前已实现
 
-## ✨ 功能
+| 路径 | 状态与用途 |
+| --- | --- |
+| Streamlit | `app.py` 仍是兼容入口，保留行情、LLM 与简易 RAG 学习功能；涉及模型/行情时需要本地配置。 |
+| FastAPI | `backend.app.main:app` 提供 `/api/v1/health/live`、`/api/v1/health/ready` 与评分接口。 |
+| 评分 API | `POST /api/v1/scoring/evaluate` 调用既有根目录评分器；数据不足返回 `insufficient_data`，不会给出评级。 |
+| Next.js | `frontend/` 提供 `/scoring`，只调用 API，不在浏览器重写评分规则。 |
+| PostgreSQL/Alembic | 数据库就绪检查和 `app_metadata` 初始迁移已具备；API 不会在启动时自动迁移。 |
+| Compose | 包含 PostgreSQL、一次性迁移、API、前端和可选 Streamlit profile 的架构定义。 |
 
-| 模块 | 说明 |
-|---|---|
-| 📊 **个股行情分析** | 输入 A 股代码，自动拉取行情、计算 MA/RSI 技术指标，并由 LLM 生成专业解读 |
-| 📰 **财报/新闻速读** | 粘贴财报或新闻文本，AI 提炼关键要点、判断情绪倾向、提示风险 |
-| 📚 **研报问答 (RAG)** | 上传研报 PDF，基于向量检索 + LLM 对文档内容进行精准问答 |
+CrewAI/多 Agent、持久化 RAG、worker/队列、认证授权、生产安全运营和发布自动化均尚未交付，不能视为现有能力。
 
-## 🛠 技术栈
+## 前置条件
 
-- **前端 / 应用层**：Streamlit
-- **大模型**：OpenAI 兼容接口（可对接 OpenAI / DeepSeek / 通义 / 智谱等）
-- **RAG**：自实现向量检索（embedding + 余弦相似度），无重型依赖，便于理解原理
-- **金融数据**：akshare（免费）
-- **数据处理**：pandas / numpy
+- CPython `3.12` 与 [uv](https://docs.astral.sh/uv/)
+- Node `24.18.0`、npm `11.16.0`
+- Docker Engine 与 Docker Compose v2（仅 Compose/真实 PostgreSQL 路径需要）
 
-## 🚀 快速开始
+## 快速开始：离线开发检查
 
 ```bash
-# 1. 使用 Python 3.12 安装依赖
+uv python install 3.12
 uv sync --all-groups
+npm --prefix frontend ci
 
-# 2. 配置 API key（复制示例文件后填入自己的 key）
+uv run ruff check .
+uv run mypy backend/app scoring.py
+uv run pytest -q
+npm --prefix frontend run lint
+npm --prefix frontend run typecheck
+npm --prefix frontend run test
+npm --prefix frontend run build
+```
+
+这些命令不启动 Docker、数据库、外部模型或生产资源。真实 PostgreSQL 集成测试需要显式提供 `TEST_DATABASE_URL`，否则会跳过。
+
+## 本地服务
+
+启动评分 API：
+
+```bash
+uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+- API 存活检查：<http://127.0.0.1:8000/api/v1/health/live>
+- Swagger：<http://127.0.0.1:8000/docs>
+- OpenAPI：<http://127.0.0.1:8000/openapi.json>
+
+启动前端（先启动 API）：
+
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 npm --prefix frontend run dev
+```
+
+打开 <http://127.0.0.1:3000/scoring>。
+
+Streamlit 兼容界面仅在需要旧功能时启动。复制 `.env.example` 为本地 `.env` 后填入自己的模型配置；切勿提交该文件或任何真实凭据：
+
+```bash
 cp .env.example .env
-# 然后编辑 .env
-
-# 3. 启动
 streamlit run app.py
 ```
 
-浏览器会自动打开 `http://localhost:8501`。
+## 数据库与 Compose
 
-## Docker Compose（P1-05）
+数据库迁移需要真实 PostgreSQL 与本地连接串：
 
-前置条件：已安装 Docker Engine 与 Docker Compose v2；本机端口 `3000`、`5432`、`8000`
-未被占用。容器构建使用 Python `3.12.11`、根目录已提交的 `uv.lock`，以及 Node
-`24.18.0`、`frontend/package-lock.json`；请勿将真实凭据写入仓库、镜像或示例文件。
+```bash
+export DATABASE_URL='postgresql://investment_agent:local-password@127.0.0.1:5432/investment_agent'
+uv run alembic -c backend/alembic.ini upgrade head
+uv run alembic -c backend/alembic.ini current
+```
 
-本地开发请先把模板复制到仓库外的安全位置并按需修改；示例中的数据库密码仅用于本地，
-不可用于生产：
+Compose 组合架构为 PostgreSQL → 一次性 `migrate` → FastAPI API → Next.js，外加可选 `legacy` Streamlit profile。Docker 是操作方验收的前置条件：本主机 Docker CLI 不可用，因此未在此主机执行 Docker 构建、启动或容器就绪验收。具备 Docker 后可按以下命令运行开发组合：
 
 ```bash
 cp deploy/env/development.example /tmp/investment-agent.dev.env
@@ -53,76 +86,22 @@ docker compose --env-file /tmp/investment-agent.dev.env \
   -f deploy/compose.base.yml -f deploy/compose.dev.yml up --build
 ```
 
-开发组合会发布 API `8000`、前端 `3000` 和 PostgreSQL `5432`。Compose 会先等待
-PostgreSQL 健康检查，再运行一次 `alembic upgrade head`；仅迁移成功后才启动 API，
-API 健康检查为 `/api/v1/health/ready`。停止服务可执行：
-
-```bash
-docker compose --env-file /tmp/investment-agent.dev.env \
-  -f deploy/compose.base.yml -f deploy/compose.dev.yml down
-```
-
-生产组合不将 PostgreSQL 端口发布到主机。请由密钥管理系统生成生产环境文件，使用
-`deploy/env/production.example` 的变量名（而不是其占位符），然后运行：
-
-```bash
-docker compose --env-file /secure/path/investment-agent.prod.env \
-  -f deploy/compose.base.yml -f deploy/compose.prod.yml up -d --build
-```
-
-旧版 Streamlit 仅作为可选兼容 profile，不会默认启动；它仍可能需要通过运行时环境变量
-提供模型凭据，切勿把凭据写入 Compose 文件。开发环境可按需追加：
+开发组合发布 `5432`、`8000`、`3000`；可选兼容 UI：
 
 ```bash
 docker compose --profile legacy --env-file /tmp/investment-agent.dev.env \
   -f deploy/compose.base.yml -f deploy/compose.dev.yml up --build
 ```
 
-## 评分数据质量门
+生产组合不发布 PostgreSQL 到主机。使用 `deploy/env/production.example` 的变量名在密钥管理系统中创建外部环境文件，替换全部占位符后再执行生产操作。
 
-`scoring.py` 提供两种评分入口：现有 Streamlit 和 LangGraph 路径在迁移期间继续
-调用 `score_stock()`，其按旧有的缺失指标归一化语义运行；新的 API 调用方必须使用
-`evaluate_score()`。
+## 文档
 
-`evaluate_score()` 会先校验数据质量：只有有效指标的全局权重覆盖率至少为 `0.80`，且
-`valuation`、`profit`、`growth`、`health` 四个核心维度均至少有一项有效指标时，才会
-返回 `status: "ok"` 和评分结果。`None`、非数值、`NaN` 及正负无穷均不计入覆盖率；
-数据不足时会返回缺失项信息且 `result` 为 `None`，不会暴露评级。
+- [本地开发与排错](docs/development/local-setup.md)
+- [Git 与 PR 流程](docs/development/git-workflow.md)
+- [当前架构与边界](docs/architecture/overview.md)
+- [API 契约](docs/api/overview.md)
 
-P1-01 的离线检查不需要 API key 或外部服务：
+## CI
 
-```bash
-uv sync --all-groups
-uv run pytest tests/unit/test_scoring_quality.py -q
-uv run ruff check scoring.py tests/unit/test_scoring_quality.py
-uv run mypy scoring.py
-python3 scoring.py
-```
-
-## 📁 项目结构
-
-```
-ai-investment-copilot/
-├── app.py            # Streamlit 主程序（三个功能 tab）
-├── llm.py            # LLM / Embedding 调用封装
-├── finance.py        # akshare 取数 + 技术指标计算
-├── rag.py            # 极简 RAG：PDF 解析 / 切分 / 向量检索
-├── requirements.txt
-└── .env.example
-```
-
-## 🗺 路线图 (Roadmap)
-
-- [ ] 接入实时新闻源，自动抓取并分析个股相关资讯
-- [ ] 多轮对话记忆（Memory）
-- [ ] 支持 ETF / 港美股
-- [ ] 把 RAG 升级为持久化向量库（Chroma）
-- [ ] 用 Next.js 重做前端，部署上线
-
-## ⚠️ 免责声明
-
-本项目仅用于技术学习与演示，所有 AI 输出**不构成任何投资建议**，据此操作风险自负。
-
----
-
-*Built by 朱怡林 · 信息与计算科学*
+PR 与相关的 `main` 推送会分别运行后端、前端和镜像构建检查。工作流仅使用 SHA 固定的 GitHub Actions、最小 `contents: read` 权限和非密钥包缓存；它们不注入 API key、不调用模型、不连接生产资源，也不推送镜像。
