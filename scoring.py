@@ -5,7 +5,11 @@
 - LLM 层:把结构化打分喂给 DeepSeek,生成自然语言投资评价 + 亮点/风险
 """
 from __future__ import annotations
+
+import math
 from dataclasses import dataclass
+from itertools import pairwise
+from typing import Any, Literal, TypedDict
 
 
 # ============================================================
@@ -72,6 +76,18 @@ RATING_BANDS = [
     (0,  "E", "回避"),
 ]
 
+CORE_DIMENSIONS = {"valuation", "profit", "growth", "health"}
+
+
+class ScoreEvaluation(TypedDict):
+    """Quality-gated scoring response for callers that need reliable coverage."""
+
+    status: Literal["ok", "insufficient_data"]
+    coverage: float
+    missing_core_dimensions: list[str]
+    missing_metrics: list[str]
+    result: dict[str, Any] | None
+
 
 # ============================================================
 # 2. 打分核心
@@ -82,14 +98,14 @@ def _interp(value: float, anchors: list[tuple[float, float]]) -> float:
         return a[0][1]
     if value >= a[-1][0]:
         return a[-1][1]
-    for (v0, s0), (v1, s1) in zip(a, a[1:]):
+    for (v0, s0), (v1, s1) in pairwise(a):
         if v0 <= value <= v1:
             t = (value - v0) / (v1 - v0) if v1 != v0 else 0
             return s0 + t * (s1 - s0)
     return a[-1][1]
 
 
-def _metric_subscore(m: Metric, value) -> float | None:
+def _metric_subscore(m: Metric, value: Any) -> float | None:
     if value is None:
         return None
     try:
@@ -101,12 +117,14 @@ def _metric_subscore(m: Metric, value) -> float | None:
     return round(_interp(value, m.anchors), 1)
 
 
-def score_stock(metrics: dict) -> dict:
+def score_stock(metrics: dict[str, Any]) -> dict[str, Any]:
     """metrics 里有哪个算哪个,缺失项不计分,同维度内权重自动重新归一。"""
-    dims_out, dim_w_total, total = [], 0.0, 0.0
+    dims_out: list[dict[str, Any]] = []
+    dim_w_total, total = 0.0, 0.0
 
     for d in SCHEME:
-        sub, w_present = [], 0.0
+        sub: list[dict[str, Any]] = []
+        w_present = 0.0
         for m in d.metrics:
             s = _metric_subscore(m, metrics.get(m.key))
             if s is None:
@@ -123,14 +141,70 @@ def score_stock(metrics: dict) -> dict:
                          "weight": d.weight, "metrics": sub})
         dim_w_total += d.weight
 
-    for d in dims_out:                   # 维度权重归一(以防有维度缺失)
-        d["weight_norm"] = round(d["weight"] / dim_w_total, 3)
-        d["contribution"] = round(d["score"] * d["weight_norm"], 1)
-        total += d["contribution"]
+    for dimension_out in dims_out:       # 维度权重归一(以防有维度缺失)
+        dimension_out["weight_norm"] = round(dimension_out["weight"] / dim_w_total, 3)
+        dimension_out["contribution"] = round(
+            dimension_out["score"] * dimension_out["weight_norm"], 1
+        )
+        total += dimension_out["contribution"]
     total = round(total, 1)
 
     grade, label = next((g, l) for thr, g, l in RATING_BANDS if total >= thr)
     return {"total": total, "grade": grade, "label": label, "dimensions": dims_out}
+
+
+def _is_valid_metric_value(value: Any) -> bool:
+    """Return whether a value can safely participate in numeric scoring."""
+    if value is None or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def evaluate_score(metrics: dict[str, Any]) -> ScoreEvaluation:
+    """Score only sufficiently complete, finite metric data.
+
+    Invalid scheme values are excluded before delegating to ``score_stock`` so
+    legacy callers keep their original semantics while new callers cannot get
+    a rating from incomplete data.
+    """
+    valid_metrics: dict[str, Any] = {}
+    missing_metrics: list[str] = []
+    missing_core_dimensions: list[str] = []
+    coverage = 0.0
+
+    for dimension in SCHEME:
+        dimension_has_valid_metric = False
+        for metric in dimension.metrics:
+            value = metrics.get(metric.key)
+            if not _is_valid_metric_value(value):
+                missing_metrics.append(metric.key)
+                continue
+            valid_metrics[metric.key] = value
+            coverage += dimension.weight * metric.weight
+            dimension_has_valid_metric = True
+        if dimension.key in CORE_DIMENSIONS and not dimension_has_valid_metric:
+            missing_core_dimensions.append(dimension.key)
+
+    coverage = round(coverage, 10)
+    if coverage < 0.80 or missing_core_dimensions:
+        return {
+            "status": "insufficient_data",
+            "coverage": coverage,
+            "missing_core_dimensions": missing_core_dimensions,
+            "missing_metrics": missing_metrics,
+            "result": None,
+        }
+
+    return {
+        "status": "ok",
+        "coverage": coverage,
+        "missing_core_dimensions": [],
+        "missing_metrics": missing_metrics,
+        "result": score_stock(valid_metrics),
+    }
 
 
 # ============================================================

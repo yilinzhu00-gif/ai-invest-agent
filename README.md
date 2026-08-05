@@ -25,8 +25,8 @@
 ## 🚀 快速开始
 
 ```bash
-# 1. 安装依赖
-pip install -r requirements.txt
+# 1. 使用 Python 3.12 安装依赖
+uv sync --all-groups
 
 # 2. 配置 API key（复制示例文件后填入自己的 key）
 cp .env.example .env
@@ -37,6 +37,27 @@ streamlit run app.py
 ```
 
 浏览器会自动打开 `http://localhost:8501`。
+
+## 评分数据质量门
+
+`scoring.py` 提供两种评分入口：现有 Streamlit 和 LangGraph 路径在迁移期间继续
+调用 `score_stock()`，其按旧有的缺失指标归一化语义运行；新的 API 调用方必须使用
+`evaluate_score()`。
+
+`evaluate_score()` 会先校验数据质量：只有有效指标的全局权重覆盖率至少为 `0.80`，且
+`valuation`、`profit`、`growth`、`health` 四个核心维度均至少有一项有效指标时，才会
+返回 `status: "ok"` 和评分结果。`None`、非数值、`NaN` 及正负无穷均不计入覆盖率；
+数据不足时会返回缺失项信息且 `result` 为 `None`，不会暴露评级。
+
+P1-01 的离线检查不需要 API key 或外部服务：
+
+```bash
+uv sync --all-groups
+uv run pytest tests/unit/test_scoring_quality.py -q
+uv run ruff check scoring.py tests/unit/test_scoring_quality.py
+uv run mypy scoring.py
+python3 scoring.py
+```
 
 ## 📁 项目结构
 
