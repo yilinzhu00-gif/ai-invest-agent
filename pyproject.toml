@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "akshare>=1.12",
+    "alembic>=1.14",
+    "asyncpg>=0.30",
     "fastapi>=0.115",
     "langchain-core>=0.3",
     "langchain-openai>=0.2",
@@ -16,6 +18,7 @@ dependencies = [
     "pydantic-settings>=2.7",
     "pypdf",
     "python-dotenv",
+    "sqlalchemy>=2.0",
     "streamlit>=1.30",
     "uvicorn[standard]>=0.34",
 ]
