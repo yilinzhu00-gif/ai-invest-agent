@@ -1,0 +1,11 @@
+name: Offline agent evaluation
+on: [pull_request]
+permissions: {contents: read}
+jobs:
+  offline-eval:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+      - run: uv sync --locked --all-groups
+      - run: uv run python -m backend.app.evals.runner --mode offline --output artifacts/evals/offline.json
