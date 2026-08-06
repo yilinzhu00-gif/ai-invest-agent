@@ -24,3 +24,13 @@ def test_observability_stack_has_collector_prometheus_and_provisioned_grafana_da
     assert "otlp:" in collector
     assert "otel-collector:8889" in prometheus
     assert dashboard.exists()
+
+
+def test_k6_load_runner_writes_machine_readable_summary() -> None:
+    script = ROOT / "load" / "k6" / "agent_runs.js"
+    runner = ROOT / "scripts" / "run-k6.sh"
+
+    assert script.exists()
+    assert "http.batch" in script.read_text()
+    assert "--summary-export" in runner.read_text()
+    assert subprocess.run(["bash", "-n", str(runner)], check=False).returncode == 0
