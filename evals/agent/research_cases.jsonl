@@ -1,0 +1,1 @@
+{"id":"research-001","dataset_version":"v1","workspace_fixture":"fixture-a","input":"根据证据总结风险","expected_citation_ids":["c1"],"forbidden":["admin_tool"],"tags":["holdout","agent"],"gates":{"schema":true,"numeric":true,"citation":true,"acl":true,"no_answer":true,"tool_policy":true}}

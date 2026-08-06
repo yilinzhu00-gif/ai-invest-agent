@@ -1,0 +1,85 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { AgentRunPanel } from "../components/agent-run-panel";
+
+function response(body: unknown, status = 200, contentType = "application/json") {
+  return new Response(typeof body === "string" ? body : JSON.stringify(body), {
+    status,
+    headers: { "content-type": contentType },
+  });
+}
+
+afterEach(() => {
+  localStorage.clear();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe("agent run panel", () => {
+  it("restores the saved run after refresh and renders persisted SSE events", async () => {
+    localStorage.setItem("investment-agent:last-run", "00000000-0000-0000-0000-000000000001");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(
+          response({
+            id: "00000000-0000-0000-0000-000000000001",
+            status: "completed",
+            executor_mode: "development_only",
+          }),
+        )
+        .mockResolvedValueOnce(
+          response(
+            "id: 1\nevent: text.delta\ndata: {\"text\":\"开发执行器已完成持久化事件演示。\"}\n\nevent: heartbeat\ndata: {}\n\n",
+            200,
+            "text/event-stream",
+          ),
+        ),
+    );
+
+    render(<AgentRunPanel />);
+
+    expect(await screen.findByText("开发执行器已完成持久化事件演示。")).toBeInTheDocument();
+    expect(screen.getByText("状态：completed")).toBeInTheDocument();
+  });
+
+  it("creates a run and saves its ID for a later refresh", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        response({
+          id: "00000000-0000-0000-0000-000000000002",
+          status: "queued",
+          executor_mode: "development_only",
+        }, 202),
+      ),
+    );
+    const user = userEvent.setup();
+
+    render(<AgentRunPanel />);
+    await user.type(screen.getByLabelText("研究问题"), "总结贵州茅台的估值风险");
+    await user.click(screen.getByRole("button", { name: "启动研究" }));
+
+    expect(await screen.findByText("状态：queued")).toBeInTheDocument();
+    expect(localStorage.getItem("investment-agent:last-run")).toBe("00000000-0000-0000-0000-000000000002");
+  });
+
+  it("cancels a restored non-terminal run", async () => {
+    localStorage.setItem("investment-agent:last-run", "00000000-0000-0000-0000-000000000003");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(response({ id: "00000000-0000-0000-0000-000000000003", status: "running", executor_mode: "development_only" }))
+        .mockResolvedValueOnce(response("event: heartbeat\ndata: {}\n\n", 200, "text/event-stream"))
+        .mockResolvedValueOnce(response({ id: "00000000-0000-0000-0000-000000000003", status: "cancelled", executor_mode: "development_only" })),
+    );
+    const user = userEvent.setup();
+
+    render(<AgentRunPanel />);
+    await user.click(await screen.findByRole("button", { name: "取消任务" }));
+
+    expect(await screen.findByText("状态：cancelled")).toBeInTheDocument();
+  });
+});

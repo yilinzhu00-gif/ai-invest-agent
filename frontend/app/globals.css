@@ -16,3 +16,5 @@ fieldset { border: 1px solid #d6dce5; margin: 1rem 0; }
 .error-card { border-left: 4px solid #b42318; }
 .total strong { font-size: 2rem; }
 .dimension { border-top: 1px solid #d6dce5; padding-top: 0.4rem; }
+.agent-run-panel { background: #fff; border: 1px solid #d6dce5; border-radius: 8px; padding: 1rem; }
+.agent-event { border-left: 3px solid #0c5db1; padding-left: 0.6rem; }

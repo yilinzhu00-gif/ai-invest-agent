@@ -22,6 +22,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = current_settings
     app.state.db_engine = None
     app.state.db_session_factory = None
+    app.state.agent_run_executor = None
     app.add_middleware(
         RequestBodyLimitMiddleware,
         max_body_bytes=current_settings.max_request_body_bytes,
@@ -32,7 +33,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=current_settings.cors_origin_list,
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-Correlation-ID"],
+        allow_headers=[
+            "Content-Type",
+            "Last-Event-ID",
+            "X-Correlation-ID",
+            "X-Development-Principal-ID",
+            "X-Development-Workspace-ID",
+        ],
     )
     app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)

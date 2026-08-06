@@ -101,6 +101,25 @@ ASCII 数字，`as_of_date` 是严格的 `YYYY-MM-DD` 日历日期，`metrics` �
 }
 ```
 
+## 开发期 Agent Run 与 SSE
+
+阶段二提供持久化的研究任务资源：
+
+- `POST /api/v1/agent/runs`：创建任务，数据库写入后快速返回 `202`。
+- `GET /api/v1/agent/runs/{run_id}`：读取任务状态。
+- `GET /api/v1/agent/runs/{run_id}/events`：返回 `text/event-stream`；事件的整数 `sequence` 是 SSE `id`，客户端可用 `Last-Event-ID` 只重放更晚事件。
+- `POST /api/v1/agent/runs/{run_id}/cancel`：幂等取消；终态不会被逆转。
+
+当前执行器响应中明确标记为 `development_only`。它将事件先持久化到 PostgreSQL，再由 SSE
+读取；它不是生产队列，进程崩溃后只能查询/重放已落库的数据，阶段三将用独立 Worker 替换。
+本阶段没有生产认证：本地开发和接口测试必须提供显式的
+`X-Development-Principal-ID` 与 `X-Development-Workspace-ID`，它们仅用于临时 workspace
+隔离测试，不能视为 OIDC、RBAC 或 RLS。
+
+事件包含 `run.started`、`step.started`、`tool.started`、`tool.finished`、`text.delta`、
+`review.required`、终态事件和 `heartbeat`。事件历史读取结束后返回 heartbeat，客户端据此
+重连；不使用 WebSocket。
+
 ## 错误与关联 ID
 
 错误响应使用稳定信封，避免返回校验细节、异常消息、连接串或堆栈：

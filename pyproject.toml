@@ -8,6 +8,7 @@ dependencies = [
     "akshare>=1.12",
     "alembic>=1.14",
     "asyncpg>=0.30",
+    "crewai>=1.0,<2.0",
     "fastapi>=0.115",
     "langchain-core>=0.3",
     "langchain-openai>=0.2",
@@ -21,6 +22,11 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0",
     "streamlit>=1.30",
     "uvicorn[standard]>=0.34",
+]
+
+[project.optional-dependencies]
+document-worker = [
+    "docling>=2,<3",
 ]
 
 [dependency-groups]

@@ -1,0 +1,1 @@
+{"id":"summary-001","dataset_version":"v1","workspace_fixture":"fixture-a","input":"总结风险","expected_structure":["summary","risks"],"forbidden":["investment_advice"],"tags":["holdout","summary"]}

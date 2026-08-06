@@ -21,6 +21,7 @@ env/
 .ruff_cache/
 .coverage
 htmlcov/
+artifacts/evals/
 
 # Frontend build and test artefacts
 frontend/node_modules/

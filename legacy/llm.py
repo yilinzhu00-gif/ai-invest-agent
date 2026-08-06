@@ -43,7 +43,7 @@ def chat(prompt: str,
         ],
         temperature=temperature,
     )
-    return resp.choices[0].message.content.strip()
+    return (resp.choices[0].message.content or "").strip()
 
 
 def embed(texts: list[str]) -> list[list[float]]:
