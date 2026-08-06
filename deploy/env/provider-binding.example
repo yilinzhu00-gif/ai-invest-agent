@@ -1,0 +1,11 @@
+# Copy to an operator-controlled secret-managed file; never commit the bound file.
+CLOUD_PROVIDER=replace-with-aws-gcp-or-azure
+DEPLOY_REGION=replace-with-region
+CONTAINER_IMAGE_DIGEST=registry.example.invalid/investment-agent@sha256:replace-with-immutable-image-digest
+GITHUB_OIDC_AUDIENCE=replace-with-cloud-workload-audience
+OIDC_ISSUER=https://replace-with-identity-provider
+OIDC_JWKS_URL=https://replace-with-identity-provider/.well-known/jwks.json
+DATABASE_SECRET_REF=replace-with-secret-manager-reference
+OBJECT_STORAGE_BUCKET=replace-with-isolated-production-bucket
+OBJECT_STORAGE_SECRET_REF=replace-with-secret-manager-reference
+GRAFANA_URL=https://replace-with-grafana-url

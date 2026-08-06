@@ -46,3 +46,14 @@ def test_backup_restore_drill_is_test_only_and_checks_postgres_and_object_storag
     assert "pg_restore" in source
     assert "minio/mc" in source
     assert subprocess.run(["bash", "-n", str(drill)], check=False).returncode == 0
+
+
+def test_provider_binding_template_and_validator_require_operator_values() -> None:
+    template = ROOT / "deploy" / "env" / "provider-binding.example"
+    validator = ROOT / "scripts" / "validate-provider-binding.sh"
+
+    assert template.exists()
+    assert "CONTAINER_IMAGE_DIGEST" in template.read_text()
+    assert "GITHUB_OIDC_AUDIENCE" in template.read_text()
+    assert validator.exists()
+    assert subprocess.run(["bash", "-n", str(validator)], check=False).returncode == 0
