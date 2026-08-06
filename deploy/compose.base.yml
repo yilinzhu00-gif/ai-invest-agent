@@ -2,7 +2,7 @@ name: investment-agent
 
 services:
   postgres:
-    image: postgres:16.9-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
