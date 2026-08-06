@@ -53,5 +53,9 @@ ignore = ["RUF007"]
 [tool.mypy]
 python_version = "3.12"
 
+[[tool.mypy.overrides]]
+module = ["docling.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 pythonpath = ["."]

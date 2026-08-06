@@ -1,7 +1,7 @@
 """Add workspace identity/ACL tables and row-level isolation policies."""
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "20260806_p3_01"
 down_revision = "20260806_p2_06"
