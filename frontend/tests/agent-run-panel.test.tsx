@@ -66,6 +66,30 @@ describe("agent run panel", () => {
     expect(localStorage.getItem("investment-agent:last-run")).toBe("00000000-0000-0000-0000-000000000002");
   });
 
+  it("subscribes to SSE immediately after creating a run", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(response({
+          id: "00000000-0000-0000-0000-000000000004",
+          status: "queued",
+          executor_mode: "development_only",
+        }, 202))
+        .mockResolvedValueOnce(response(
+          "id: 1\nevent: text.delta\ndata: {\"text\":\"研究已完成\"}\n\n",
+          200,
+          "text/event-stream",
+        )),
+    );
+    const user = userEvent.setup();
+
+    render(<AgentRunPanel />);
+    await user.type(screen.getByLabelText("研究问题"), "上证指数走势");
+    await user.click(screen.getByRole("button", { name: "启动研究" }));
+
+    expect(await screen.findByText("研究已完成")).toBeInTheDocument();
+  });
+
   it("cancels a restored non-terminal run", async () => {
     localStorage.setItem("investment-agent:last-run", "00000000-0000-0000-0000-000000000003");
     vi.stubGlobal(
@@ -73,6 +97,7 @@ describe("agent run panel", () => {
       vi.fn()
         .mockResolvedValueOnce(response({ id: "00000000-0000-0000-0000-000000000003", status: "running", executor_mode: "development_only" }))
         .mockResolvedValueOnce(response("event: heartbeat\ndata: {}\n\n", 200, "text/event-stream"))
+        .mockResolvedValueOnce(response({ id: "00000000-0000-0000-0000-000000000003", status: "running", executor_mode: "development_only" }))
         .mockResolvedValueOnce(response({ id: "00000000-0000-0000-0000-000000000003", status: "cancelled", executor_mode: "development_only" })),
     );
     const user = userEvent.setup();

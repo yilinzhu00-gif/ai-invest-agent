@@ -25,6 +25,18 @@ export function AgentRunPanel() {
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
 
+  async function subscribeToEvents(runId: string, isCancelled = () => false) {
+    const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${runId}/events`, {
+      headers: { ...developmentHeaders, "Last-Event-ID": "0" },
+    });
+    if (!response.ok) throw new Error("events_unavailable");
+    for await (const event of readAgentEvents(response)) {
+      if (isCancelled()) return;
+      if (event.id !== null || event.event !== "heartbeat") setEvents((existing) => [...existing, event]);
+    }
+    if (!isCancelled()) setRun(await readRun(runId));
+  }
+
   useEffect(() => {
     const savedRunId = window.localStorage.getItem(storageKey);
     if (!savedRunId) return;
@@ -35,14 +47,7 @@ export function AgentRunPanel() {
         const persistedRun = await readRun(runId);
         if (cancelled) return;
         setRun(persistedRun);
-        const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${runId}/events`, {
-          headers: { ...developmentHeaders, "Last-Event-ID": "0" },
-        });
-        if (!response.ok) throw new Error("events_unavailable");
-        for await (const event of readAgentEvents(response)) {
-          if (cancelled) return;
-          if (event.id !== null || event.event !== "heartbeat") setEvents((existing) => [...existing, event]);
-        }
+        await subscribeToEvents(runId, () => cancelled);
       } catch {
         if (!cancelled) setError("无法恢复该研究任务，请创建新的任务后重试。");
       }
@@ -65,6 +70,9 @@ export function AgentRunPanel() {
       setEvents([]);
       setError(null);
       setRun(created);
+      void subscribeToEvents(created.id).catch(() => {
+        setError("任务已创建，但无法接收实时进度。请刷新页面后重试。");
+      });
     } catch {
       setError("无法创建研究任务，请稍后重试。");
     }
@@ -87,7 +95,7 @@ export function AgentRunPanel() {
   return (
     <section className="agent-run-panel" aria-label="研究任务">
       <h2>研究任务</h2>
-      <p>开发环境仅展示可恢复的 Run 与 SSE 事件；生产队列将在阶段三替换当前执行器。</p>
+      <p>任务进度会通过 SSE 实时更新；生产环境由 Redis/Celery Worker 执行并持久化事件。</p>
       <label>
         研究问题
         <input value={question} onChange={(event) => setQuestion(event.target.value)} />
