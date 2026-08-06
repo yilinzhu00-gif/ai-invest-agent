@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from uuid import UUID
 
+from sqlalchemy import text
+
 from backend.app.domain.agent_runs.models import AgentRun, AgentRunEvent
 from backend.app.domain.agent_runs.repository import AgentRunRepository
 from backend.app.domain.agent_runs.schemas import AgentRunStatus
@@ -33,6 +35,7 @@ class AgentRunService:
     async def create(
         self, principal: DevelopmentPrincipal, question: str, correlation_id: str
     ) -> AgentRun:
+        await self._set_rls_context(principal)
         run = await self.repository.create_run(
             workspace_id=principal.workspace_id,
             principal_id=principal.principal_id,
@@ -44,6 +47,7 @@ class AgentRunService:
         return run
 
     async def get(self, run_id: UUID, principal: DevelopmentPrincipal) -> AgentRun:
+        await self._set_rls_context(principal)
         run = await self.repository.get_run(run_id)
         self._authorize(run, principal)
         assert run is not None
@@ -63,6 +67,7 @@ class AgentRunService:
         event_type: str,
         payload: dict[str, object] | None = None,
     ) -> AgentRun:
+        await self._set_rls_context(principal)
         run = await self.repository.get_run(run_id, lock=True)
         self._authorize(run, principal)
         assert run is not None
@@ -81,6 +86,7 @@ class AgentRunService:
         event_type: str,
         payload: dict[str, object],
     ) -> AgentRunEvent:
+        await self._set_rls_context(principal)
         run = await self.repository.get_run(run_id, lock=True)
         self._authorize(run, principal)
         assert run is not None
@@ -89,6 +95,7 @@ class AgentRunService:
         return event
 
     async def cancel(self, run_id: UUID, principal: DevelopmentPrincipal) -> AgentRun:
+        await self._set_rls_context(principal)
         run = await self.repository.get_run(run_id, lock=True)
         self._authorize(run, principal)
         assert run is not None
@@ -108,3 +115,13 @@ class AgentRunService:
             or run.principal_id != principal.principal_id
         ):
             raise AgentRunNotFoundError
+
+    async def _set_rls_context(self, principal: DevelopmentPrincipal) -> None:
+        await self.repository.session.execute(
+            text("SELECT set_config('app.current_user_id', :user_id, true)"),
+            {"user_id": principal.principal_id},
+        )
+        await self.repository.session.execute(
+            text("SELECT set_config('app.current_workspace_id', :workspace_id, true)"),
+            {"workspace_id": principal.workspace_id},
+        )
