@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     max_request_body_bytes: int = Field(default=64 * 1024, gt=0)
     agent_run_timeout_seconds: int = Field(default=180, gt=0, le=3600)
     agent_max_steps: int = Field(default=8, gt=0, le=100)
+    agent_runtime: Literal["langgraph", "crewai"] = "langgraph"
+    agent_max_revisions: int = Field(default=1, ge=0, le=1)
     sse_heartbeat_seconds: int = Field(default=15, gt=0, le=60)
     chat_model: str = "gpt-4o-mini"
     review_model: str = "gpt-4o-mini"

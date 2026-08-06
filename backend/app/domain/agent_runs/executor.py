@@ -2,10 +2,14 @@
 
 import asyncio
 from contextlib import suppress
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from backend.app.agents.benchmark import BaselineAnalyst, BaselineReviewer
+from backend.app.agents.flow import ControlledResearchFlow
+from backend.app.agents.runtime import run_with_runtime
+from backend.app.agents.schemas import AgentRuntime, Citation, ResearchRequest
 from backend.app.core.config import Settings
 from backend.app.domain.agent_runs.repository import AgentRunRepository
 from backend.app.domain.agent_runs.schemas import AgentRunStatus
@@ -39,15 +43,39 @@ class DevelopmentRunExecutor:
                         return
                     await self.wait_before_first_step()
                     await service.append_event(run_id, principal, "step.started", {"step": 1})
-                    await service.append_event(run_id, principal, "tool.started", {"tool": "development_stub"})
-                    await service.append_event(run_id, principal, "tool.finished", {"tool": "development_stub"})
+                    request = ResearchRequest(
+                        run_id=run_id,
+                        workspace_id=uuid5(NAMESPACE_URL, f"development-workspace:{principal.workspace_id}"),
+                        question=run.question,
+                        evidence=[
+                            Citation(
+                                id="development-run-input",
+                                source="development-executor",
+                                locator="run-question",
+                                text=run.question,
+                            )
+                        ],
+                    )
+                    outcome = await run_with_runtime(
+                        AgentRuntime(self.settings.agent_runtime),
+                        ControlledResearchFlow(BaselineAnalyst(), BaselineReviewer()),
+                        request,
+                    )
+                    await service.append_event(
+                        run_id,
+                        principal,
+                        "validation.finished",
+                        {"passed": outcome.validation.passed, "errors": outcome.validation.errors},
+                    )
                     await service.append_event(
                         run_id,
                         principal,
                         "text.delta",
-                        {"text": "开发执行器已完成持久化事件演示。"},
+                        {"text": outcome.draft.summary if outcome.draft else "开发执行器未生成草稿。"},
                     )
-                    await service.append_event(run_id, principal, "review.required", {})
+                    await service.append_event(
+                        run_id, principal, "review.required", {"verdict": outcome.verdict.value}
+                    )
                     await service.transition(
                         run_id, principal, AgentRunStatus.COMPLETED, "run.completed"
                     )
