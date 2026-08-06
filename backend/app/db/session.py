@@ -33,7 +33,7 @@ def create_session_factory(settings: Settings) -> async_sessionmaker[AsyncSessio
     return async_sessionmaker(create_database_engine(settings), expire_on_commit=False)
 
 
-def _get_request_session_factory(request: Request) -> async_sessionmaker[AsyncSession]:
+def get_request_session_factory(request: Request) -> async_sessionmaker[AsyncSession]:
     factory = getattr(request.app.state, "db_session_factory", None)
     if factory is None:
         engine = create_database_engine(request.app.state.settings)
@@ -45,7 +45,7 @@ def _get_request_session_factory(request: Request) -> async_sessionmaker[AsyncSe
 
 async def get_db_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """Yield an independent session and close it once its request completes."""
-    session_factory = _get_request_session_factory(request)
+    session_factory = get_request_session_factory(request)
     async with session_factory() as session:
         yield session
 

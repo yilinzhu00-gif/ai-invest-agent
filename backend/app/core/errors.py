@@ -94,7 +94,7 @@ class RequestBodyLimitMiddleware:
         async def replay_body() -> Message:
             nonlocal replayed
             if replayed:
-                return {"type": "http.disconnect"}
+                return await receive()
             replayed = True
             return {"type": "http.request", "body": b"".join(body_parts), "more_body": False}
 

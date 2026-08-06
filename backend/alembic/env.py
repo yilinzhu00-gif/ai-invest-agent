@@ -9,6 +9,7 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from backend.app.db.base import Base
+from backend.app.domain.agent_runs import models as agent_run_models  # noqa: F401
 
 config = context.config
 
