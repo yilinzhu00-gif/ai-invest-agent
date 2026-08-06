@@ -90,7 +90,7 @@ TOOLS = [get_market_snapshot, score_stock, search_research]
 # ============================================================
 def _build_llm():
     return ChatOpenAI(
-        model="deepseek-chat",
+        model=os.getenv("CHAT_MODEL", "gpt-4o-mini"),
         api_key=os.getenv("OPENAI_API_KEY", ""),
         base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
         temperature=0.3,

@@ -32,6 +32,9 @@ Next.js /scoring ──POST /api/v1/scoring/evaluate──> FastAPI ──> scor
   保存 Run、顺序事件与用户消息；`/api/v1/agent/runs` 使用 SSE 重放已落库事件。当前
   `DevelopmentRunExecutor` 是显式 `development_only` 的进程内执行器，不能替代阶段三的队列或
   跨进程恢复机制；临时 header principal 仅用于本地 workspace 隔离测试。
+- **模型边界（阶段二开发边界）**：`backend/app/models` 提供 `ModelGateway`、OpenAI-compatible
+  adapter 和 `LegacyModelAdapter` 回滚路径；Prompt 文件按 ID/版本/SHA 记录，模型调用的 token、费用
+  和延迟使用统一 usage 契约。离线测试只使用 mock，不调用付费 provider。
 - **Compose**：基础拓扑包含 PostgreSQL、一次性 `migrate`、API、前端以及可选 `legacy` Streamlit profile。开发组合发布 `5432/8000/3000`；生产组合不发布 PostgreSQL 端口。
 
 ## 运行边界

@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     agent_run_timeout_seconds: int = Field(default=180, gt=0, le=3600)
     agent_max_steps: int = Field(default=8, gt=0, le=100)
     sse_heartbeat_seconds: int = Field(default=15, gt=0, le=60)
+    chat_model: str = "gpt-4o-mini"
+    review_model: str = "gpt-4o-mini"
+    embed_model: str = "text-embedding-3-small"
+    model_run_max_tokens: int = Field(default=16_000, gt=0)
+    model_run_max_cost_microusd: int = Field(default=1_000_000, gt=0)
 
     @model_validator(mode="after")
     def require_database_url_in_production(self) -> "Settings":
