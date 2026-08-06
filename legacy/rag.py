@@ -6,7 +6,7 @@
 import numpy as np
 from pypdf import PdfReader
 
-from llm import embed
+from legacy.llm import embed
 
 
 def load_pdf(file) -> str:

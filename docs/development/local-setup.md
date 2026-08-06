@@ -37,7 +37,7 @@ uv sync --locked --all-groups
 npm --prefix frontend ci
 
 uv run ruff check .
-uv run mypy backend/app scoring.py
+uv run mypy backend/app legacy/scoring.py
 uv run pytest -q
 npm --prefix frontend run lint
 npm --prefix frontend run typecheck
@@ -81,7 +81,7 @@ Streamlit 是仍受支持的旧界面。只有使用行情、LLM 或 RAG 功能�
 
 ```bash
 cp .env.example .env
-streamlit run app.py
+streamlit run legacy/app.py
 ```
 
 默认地址为 `http://localhost:8501`。模型或行情连接失败时，先检查本地 `.env`、供应商权限和网络；它们不是离线 CI 的依赖。

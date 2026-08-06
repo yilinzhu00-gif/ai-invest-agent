@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import unittest
 
-import scoring
+from legacy import scoring
 
 DEMO_METRICS = {
     "pe_ttm": 18.5,

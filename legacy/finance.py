@@ -1,4 +1,4 @@
-"""金融数据获取与技术指标计算（基于 akshare，数据免费、无需 token）。"""
+"""迁移期金融数据获取与技术指标计算（基于 akshare，数据免费、无需 token）。"""
 import logging
 import time
 

@@ -8,7 +8,8 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import agent
+import legacy
+from legacy import agent
 
 FULL_METRICS = {
     "pe_ttm": 18.5,
@@ -64,17 +65,14 @@ def _run_streamlit_score(metrics: dict[str, float]) -> tuple[MagicMock, int]:
     fake_llm = SimpleNamespace(_chat_client=fake_client, CHAT_MODEL="test-model")
     fake_agent = SimpleNamespace(set_research_store=lambda _: None)
 
-    with patch.dict(
-        sys.modules,
-        {
-            "streamlit": fake_streamlit,
-            "finance": fake_finance,
-            "llm": fake_llm,
-            "agent": fake_agent,
-            "rag": SimpleNamespace(),
-        },
+    with (
+        patch.dict(sys.modules, {"streamlit": fake_streamlit}),
+        patch.object(legacy, "finance", fake_finance),
+        patch.object(legacy, "llm", fake_llm, create=True),
+        patch.object(legacy, "agent", fake_agent),
+        patch.object(legacy, "rag", SimpleNamespace(), create=True),
     ):
-        runpy.run_path("app.py", run_name="__legacy_scoring_ui_test__")
+        runpy.run_path("legacy/app.py", run_name="__legacy_scoring_ui_test__")
 
     return fake_streamlit, explanation_calls
 

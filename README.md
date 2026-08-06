@@ -8,9 +8,9 @@
 
 | 路径 | 状态与用途 |
 | --- | --- |
-| Streamlit | `app.py` 仍是兼容入口，保留行情、LLM 与简易 RAG 学习功能；涉及模型/行情时需要本地配置。 |
+| Streamlit | `legacy/app.py` 是兼容入口；`legacy/` 集中保留原有行情、LLM、RAG 与评分实现，涉及模型/行情时需要本地配置。 |
 | FastAPI | `backend.app.main:app` 提供 `/api/v1/health/live`、`/api/v1/health/ready` 与评分接口。 |
-| 评分 API | `POST /api/v1/scoring/evaluate` 调用既有根目录评分器；数据不足返回 `insufficient_data`，不会给出评级。 |
+| 评分 API | `POST /api/v1/scoring/evaluate` 调用 `legacy/` 中保留的评分器；数据不足返回 `insufficient_data`，不会给出评级。 |
 | Next.js | `frontend/` 提供 `/scoring`，只调用 API，不在浏览器重写评分规则。 |
 | PostgreSQL/Alembic | 数据库就绪检查和 `app_metadata` 初始迁移已具备；API 不会在启动时自动迁移。 |
 | Compose | 包含 PostgreSQL、一次性迁移、API、前端和可选 Streamlit profile 的架构定义。 |
@@ -31,7 +31,7 @@ uv sync --locked --all-groups
 npm --prefix frontend ci
 
 uv run ruff check .
-uv run mypy backend/app scoring.py
+uv run mypy backend/app legacy/scoring.py
 uv run pytest -q
 npm --prefix frontend run lint
 npm --prefix frontend run typecheck
@@ -66,7 +66,7 @@ Streamlit 兼容界面仅在需要旧功能时启动。复制 `.env.example` 为
 
 ```bash
 cp .env.example .env
-streamlit run app.py
+streamlit run legacy/app.py
 ```
 
 ## 数据库与 Compose

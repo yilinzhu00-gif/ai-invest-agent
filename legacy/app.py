@@ -1,17 +1,13 @@
 """AI 投研助手 —— Streamlit 主程序。
 
 功能：① 个股行情分析  ② 财报/新闻速读  ③ 研报问答 (RAG)  ④ 结构化评分
-运行：streamlit run app.py
+运行：streamlit run legacy/app.py
 """
 import logging
 
 import streamlit as st
 
-import agent
-import finance
-import llm
-import rag
-import scoring
+from legacy import agent, finance, llm, rag, scoring
 
 logger = logging.getLogger(__name__)
 

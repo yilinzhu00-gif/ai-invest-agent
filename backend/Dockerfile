@@ -18,7 +18,7 @@ WORKDIR /app
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --create-home --shell /usr/sbin/nologin app \
     && mkdir -p /app/logs && chown app:app /app/logs
 COPY --from=dependencies /opt/venv /opt/venv
-COPY --chown=app:app scoring.py agent.py app.py finance.py llm.py rag.py ./
+COPY --chown=app:app legacy ./legacy
 COPY --chown=app:app backend/__init__.py ./backend/__init__.py
 COPY --chown=app:app backend/app ./backend/app
 COPY --chown=app:app backend/alembic ./backend/alembic

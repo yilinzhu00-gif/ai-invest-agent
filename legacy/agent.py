@@ -23,8 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
-import finance
-import scoring
+from legacy import finance, scoring
 
 logger = logging.getLogger(__name__)
 

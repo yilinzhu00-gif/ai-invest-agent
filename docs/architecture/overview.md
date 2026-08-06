@@ -5,7 +5,7 @@
 项目正在从单体 Streamlit 学习应用过渡为可独立演进的 API 与 Web 评分切片。以下组件已实现：
 
 ```text
-Streamlit app.py / LangGraph agent.py ──> finance + scoring.evaluate_score
+Streamlit legacy/app.py / LangGraph legacy/agent.py ──> legacy/finance + legacy/scoring.evaluate_score
                                                     │
                                       legacy scoring.score_stock internally
 
@@ -18,7 +18,7 @@ Next.js /scoring ──POST /api/v1/scoring/evaluate──> FastAPI ──> scor
                                              Alembic app_metadata baseline
 ```
 
-- **Streamlit 兼容路径**：根目录 `app.py` 和 `agent.py` 仍提供旧的行情、LLM 与 RAG
+- **Streamlit 兼容路径**：`legacy/app.py` 和 `legacy/agent.py` 仍提供旧的行情、LLM 与 RAG
   界面，但评分调用已迁移到 `scoring.evaluate_score()`，数据不足时不显示评级，也不生成
   LLM 评分解释。它们可以读取本地模型配置，因而不是 API/前端离线测试的依赖。
 - **FastAPI**：`backend.app.main:create_app` 暴露 `/api/v1` 健康检查和评分 API，负责 CORS、关联 ID 与安全错误信封。

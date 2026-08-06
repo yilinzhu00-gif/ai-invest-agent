@@ -1,5 +1,5 @@
 from backend.app.domain.scoring.schemas import ScoringEvaluationResponse
-from scoring import evaluate_score
+from legacy.scoring import evaluate_score
 
 
 class ScoringService:

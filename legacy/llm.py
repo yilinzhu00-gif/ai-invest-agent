@@ -1,4 +1,4 @@
-"""LLM 与 Embedding 调用封装。
+"""迁移期 LLM 与 Embedding 调用封装。
 
 chat 和 embedding 可以分别对接不同的服务：
   - chat：DeepSeek / 通义 / 智谱 等（在 .env 里用 OPENAI_API_KEY / OPENAI_BASE_URL 配置）
