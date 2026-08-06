@@ -96,7 +96,9 @@ uv run alembic -c backend/alembic.ini upgrade head
 uv run alembic -c backend/alembic.ini current
 ```
 
-当前唯一基线迁移创建 `app_metadata`。API 在启动时不会自动执行迁移；生产和 Compose 都由显式 `migrate` 步骤处理。
+当前迁移链从 `app_metadata` 基线扩展到 Agent Run、文档和 pgvector 知识库。`/api/v1/health/ready`
+仅在数据库已升级到当前 Alembic head 时才返回就绪。API 在启动时不会自动执行迁移；生产和 Compose
+都由显式 `migrate` 步骤处理。
 
 ## Docker Compose（需 Docker）
 

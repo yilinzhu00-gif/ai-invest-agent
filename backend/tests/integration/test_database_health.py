@@ -18,9 +18,11 @@ pytestmark = pytest.mark.skipif(
 if TEST_DATABASE_URL:
     from alembic import command
     from alembic.config import Config
+    from alembic.script import ScriptDirectory
     from fastapi.testclient import TestClient
 
     from backend.app.core.config import Settings
+    from backend.app.db.health import CURRENT_ALEMBIC_REVISION
     from backend.app.main import create_app
 
 
@@ -31,6 +33,13 @@ def migrated_settings() -> "Settings":
     config.set_main_option("sqlalchemy.url", TEST_DATABASE_URL or "")
     command.upgrade(config, "head")
     return Settings(app_env="test", database_url=TEST_DATABASE_URL)
+
+
+def test_readiness_revision_tracks_the_alembic_head() -> None:
+    """Adding a migration must update the revision checked by readiness."""
+    config = Config("backend/alembic.ini")
+
+    assert CURRENT_ALEMBIC_REVISION == ScriptDirectory.from_config(config).get_current_head()
 
 
 def test_ready_is_healthy_after_real_postgres_migration(migrated_settings: "Settings") -> None:
