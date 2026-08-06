@@ -24,6 +24,11 @@ dependencies = [
     "uvicorn[standard]>=0.34",
 ]
 
+[project.optional-dependencies]
+document-worker = [
+    "docling>=2,<3",
+]
+
 [dependency-groups]
 dev = [
     "mypy",

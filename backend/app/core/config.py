@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     agent_max_steps: int = Field(default=8, gt=0, le=100)
     agent_runtime: Literal["langgraph", "crewai"] = "langgraph"
     agent_max_revisions: int = Field(default=1, ge=0, le=1)
+    document_max_bytes: int = Field(default=50 * 1024 * 1024, gt=0, le=50 * 1024 * 1024)
+    document_max_pages: int = Field(default=500, gt=0, le=500)
+    document_ocr_languages: str = "chi_sim+eng"
+    document_table_merge_threshold: float = Field(default=0.90, ge=0, le=1)
     sse_heartbeat_seconds: int = Field(default=15, gt=0, le=60)
     chat_model: str = "gpt-4o-mini"
     review_model: str = "gpt-4o-mini"
