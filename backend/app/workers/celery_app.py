@@ -20,3 +20,6 @@ def create_celery_app(broker_url: str = "redis://localhost:6379/0") -> Celery:
         worker_prefetch_multiplier=1,
     )
     return app
+
+
+app = create_celery_app()
