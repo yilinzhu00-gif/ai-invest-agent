@@ -28,9 +28,12 @@ router = APIRouter(prefix="/agent/runs", tags=["agent-runs"])
 
 
 async def get_development_principal(
+    request: Request,
     principal_id: Annotated[str | None, Header(alias="X-Development-Principal-ID")] = None,
     workspace_id: Annotated[str | None, Header(alias="X-Development-Workspace-ID")] = None,
 ) -> DevelopmentPrincipal:
+    if request.app.state.settings.app_env == "production":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
     if not principal_id or not workspace_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
     return DevelopmentPrincipal(principal_id=principal_id, workspace_id=workspace_id)
