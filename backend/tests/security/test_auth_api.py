@@ -103,3 +103,30 @@ def test_oidc_dependency_builds_principal_from_active_workspace_membership() -> 
     assert principal.active_workspace_id == "workspace-a"
     assert principal.roles == frozenset({"analyst"})
     assert principal.permissions == frozenset({"agent:run"})
+
+
+def test_oidc_validator_accepts_rfc9068_access_token_type() -> None:
+    signing_key = "test-signing-key-with-at-least-thirty-two-bytes"
+    now = datetime.now(UTC)
+    token = jwt.encode(
+        {
+            "sub": "user-1",
+            "iss": "https://issuer.example",
+            "aud": "investment-api",
+            "exp": now + timedelta(minutes=5),
+            "nbf": now - timedelta(seconds=1),
+            "jti": "token-1",
+            "scope": "agent:run",
+        },
+        signing_key,
+        algorithm="HS256",
+        headers={"kid": "test-key", "typ": "at+jwt"},
+    )
+    validator = OidcJwtValidator(
+        OidcSettings(
+            issuer="https://issuer.example", audience="investment-api", allowed_algorithms=("HS256",)
+        ),
+        key_resolver=lambda _kid: signing_key,
+    )
+
+    assert validator.validate(token)["sub"] == "user-1"

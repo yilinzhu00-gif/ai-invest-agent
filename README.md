@@ -15,7 +15,7 @@
 | PostgreSQL/Alembic | 数据库就绪检查和 `app_metadata` 初始迁移已具备；API 不会在启动时自动迁移。 |
 | Compose | 包含 PostgreSQL、一次性迁移、API、前端和可选 Streamlit profile 的架构定义。 |
 
-CrewAI/多 Agent、持久化 RAG、worker/队列、认证授权、生产安全运营和发布自动化均尚未交付，不能视为现有能力。
+研究任务、Redis/Celery worker 生命周期、OIDC/JWK 后端校验、Workspace membership、监控和备份演练已具备实现。单机 ECS 部署采用 HTTPS/Nginx、OIDC 登录、PostgreSQL、Redis 与 worker；它不等同于 RDS/OSS/多可用区高可用生产架构，具体步骤见[部署文档](docs/operations/deployment.md)。
 
 ## 前置条件
 
@@ -94,7 +94,7 @@ docker compose --profile legacy --env-file /tmp/investment-agent.dev.env \
   -f deploy/compose.base.yml -f deploy/compose.dev.yml up --build
 ```
 
-生产组合不发布 PostgreSQL 到主机。使用 `deploy/env/production.example` 的变量名在密钥管理系统中创建外部环境文件，替换全部占位符后再执行生产操作。
+生产组合不发布 PostgreSQL 到主机。使用 `deploy/env/production.example` 的变量名在密钥管理系统中创建外部环境文件，替换全部占位符后再执行生产操作。针对低成本单机 ECS，使用 `deploy/env/single-node.example` 与 `deploy/compose.single-node.yml`，其唯一公网入口是 Nginx 的 80/443，且必须配置 OIDC 与 HTTPS；完整操作见[部署文档](docs/operations/deployment.md)。
 
 ## 文档
 

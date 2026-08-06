@@ -2,6 +2,17 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("../components/auth-provider", () => ({
+  useAuth: () => ({
+    status: "authenticated",
+    accessToken: "access-token",
+    workspaceId: "workspace-a",
+    error: null,
+    signIn: vi.fn(),
+    signOut: vi.fn(),
+  }),
+}));
+
 import { AgentRunPanel } from "../components/agent-run-panel";
 
 function response(body: unknown, status = 200, contentType = "application/json") {

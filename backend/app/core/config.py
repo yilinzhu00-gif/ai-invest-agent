@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     oidc_issuer: str | None = None
     oidc_audience: str | None = None
     oidc_jwks_url: str | None = None
+    oidc_access_token_types: str = "access,at+jwt"
     oidc_clock_skew_seconds: int = Field(default=30, ge=0, le=300)
     db_pool_size: int = 5
     db_max_overflow: int = 10
@@ -62,6 +63,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return self.cors_origins.split(",")
+
+    @property
+    def oidc_access_token_type_list(self) -> tuple[str, ...]:
+        return tuple(token_type.strip() for token_type in self.oidc_access_token_types.split(",") if token_type.strip())
 
     @property
     def async_database_url(self) -> str | None:

@@ -36,6 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             audience=current_settings.oidc_audience,
             jwks_url=current_settings.oidc_jwks_url,
             clock_skew_seconds=current_settings.oidc_clock_skew_seconds,
+            allowed_token_types=current_settings.oidc_access_token_type_list,
         )
     app.add_middleware(
         RequestBodyLimitMiddleware,

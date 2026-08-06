@@ -1,0 +1,52 @@
+services:
+  postgres:
+    restart: unless-stopped
+
+  redis:
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+  migrate:
+    restart: "no"
+
+  api:
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      REDIS_URL: ${REDIS_URL:?REDIS_URL must be set}
+      OIDC_ISSUER: ${OIDC_ISSUER:?OIDC_ISSUER must be set}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:?OIDC_AUDIENCE must be set}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL:?OIDC_JWKS_URL must be set}
+      OIDC_ACCESS_TOKEN_TYPES: ${OIDC_ACCESS_TOKEN_TYPES:-access,at+jwt}
+
+  worker:
+    restart: unless-stopped
+
+  frontend:
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    environment:
+      NGINX_ENVSUBST_FILTER: "SERVER_NAME|WWW_SERVER_NAME"
+      SERVER_NAME: ${SERVER_NAME:?SERVER_NAME must be set}
+      WWW_SERVER_NAME: ${WWW_SERVER_NAME:?WWW_SERVER_NAME must be set}
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${TLS_CERT_FILE:?TLS_CERT_FILE must be set}:/etc/nginx/certs/site.pem:ro
+      - ${TLS_KEY_FILE:?TLS_KEY_FILE must be set}:/etc/nginx/certs/site.key:ro
+    networks: [application]
+
+volumes:
+  redis_data:

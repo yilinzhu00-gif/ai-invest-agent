@@ -9,6 +9,8 @@ __pycache__/
 venv/
 .venv/
 env/
+!deploy/env/
+!deploy/env/*.example
 
 # IDE / 系统
 .vscode/
@@ -29,3 +31,7 @@ frontend/.next/
 frontend/coverage/
 frontend/tsconfig.tsbuildinfo
 reports/
+
+# Operator-managed deployment secrets and TLS material
+deploy/certs/
+deploy/env/*.env

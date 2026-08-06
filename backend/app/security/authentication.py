@@ -28,6 +28,7 @@ class OidcSettings:
     audience: str
     clock_skew_seconds: int = 30
     allowed_algorithms: tuple[str, ...] = ("RS256",)
+    allowed_token_types: tuple[str, ...] = ("access", "at+jwt")
 
 
 class BoundedJwkCache:
@@ -87,7 +88,8 @@ class OidcJwtValidator:
             raise JwtValidationError("jwk_unavailable") from error
         except InvalidTokenError as error:
             raise JwtValidationError("invalid_token") from error
-        if claims.get("typ") != "access":
+        token_type = claims.get("typ") or header.get("typ")
+        if token_type not in self.settings.allowed_token_types:
             raise JwtValidationError("invalid_token_type")
         if not isinstance(claims.get("scope", ""), str):
             raise JwtValidationError("invalid_scope")
@@ -107,11 +109,16 @@ class OidcJwtValidator:
 
 
 def build_oidc_jwt_validator(
-    *, issuer: str, audience: str, jwks_url: str, clock_skew_seconds: int
+    *, issuer: str, audience: str, jwks_url: str, clock_skew_seconds: int, allowed_token_types: tuple[str, ...] = ("access", "at+jwt")
 ) -> OidcJwtValidator:
     """Build the production validator backed by the configured OIDC JWK provider."""
     jwk_client = PyJWKClient(jwks_url)
     return OidcJwtValidator(
-        OidcSettings(issuer=issuer, audience=audience, clock_skew_seconds=clock_skew_seconds),
+        OidcSettings(
+            issuer=issuer,
+            audience=audience,
+            clock_skew_seconds=clock_skew_seconds,
+            allowed_token_types=allowed_token_types,
+        ),
         key_resolver=lambda kid: jwk_client.get_signing_key(kid or "").key,
     )

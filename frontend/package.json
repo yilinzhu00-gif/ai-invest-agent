@@ -16,9 +16,14 @@
   },
   "dependencies": {
     "next": "15.5.22",
+    "oidc-client-ts": "^3.5.0",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "zod": "3.24.1"
+  },
+  "overrides": {
+    "postcss": "8.5.25",
+    "sharp": "0.35.2"
   },
   "devDependencies": {
     "@eslint/js": "9.33.0",
