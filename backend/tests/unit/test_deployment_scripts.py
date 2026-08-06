@@ -34,3 +34,15 @@ def test_k6_load_runner_writes_machine_readable_summary() -> None:
     assert "http.batch" in script.read_text()
     assert "--summary-export" in runner.read_text()
     assert subprocess.run(["bash", "-n", str(runner)], check=False).returncode == 0
+
+
+def test_backup_restore_drill_is_test_only_and_checks_postgres_and_object_storage() -> None:
+    drill = ROOT / "scripts" / "backup-restore-drill.sh"
+
+    assert drill.exists()
+    source = drill.read_text()
+    assert "DRILL_ENV" in source
+    assert "pg_dump" in source
+    assert "pg_restore" in source
+    assert "minio/mc" in source
+    assert subprocess.run(["bash", "-n", str(drill)], check=False).returncode == 0
