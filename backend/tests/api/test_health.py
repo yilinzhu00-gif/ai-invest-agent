@@ -19,6 +19,16 @@ def test_live_health_returns_healthy_status_and_version() -> None:
     assert response.json() == {"status": "healthy", "version": "0.1.0"}
 
 
+def test_prometheus_metrics_are_exposed_without_high_cardinality_labels() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert "investment_agent_http_requests_total" in response.text
+    assert "workspace_id" not in response.text
+
+
 def test_ready_without_database_url_is_safe_while_live_stays_healthy() -> None:
     """Treating an unconfigured database as ready would route traffic too early."""
     client = TestClient(create_app())
