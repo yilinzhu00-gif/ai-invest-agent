@@ -1,6 +1,11 @@
 name: investment-agent
 
 services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    networks: [application]
+
   postgres:
     image: pgvector/pgvector:pg16
     environment:
@@ -55,6 +60,21 @@ services:
       - app_logs:/app/logs
     networks:
       - application
+
+  worker:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    command: ["celery", "-A", "backend.app.workers.celery_app", "worker", "-Q", "agent,ingestion,ocr,embedding", "--concurrency=1"]
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+    depends_on:
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    networks: [application]
 
   frontend:
     build:

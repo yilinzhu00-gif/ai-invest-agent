@@ -135,3 +135,12 @@ docker compose --env-file /tmp/investment-agent.dev.env \
 | API `/ready` 返回 503 | 确认 `DATABASE_URL` 可连接，执行 `alembic upgrade head`，并确认 `alembic_version` 为当前修订。 |
 | API 端口已占用 | 使用其他端口启动 Uvicorn，并相应设置 `NEXT_PUBLIC_API_BASE_URL`。 |
 | Compose 不可用 | 安装并启动 Docker Engine/Compose v2；在其可用前只运行上面的离线检查。 |
+# Local load report
+
+Start the API locally, install k6 with `brew install k6`, then run:
+
+```bash
+BASE_URL=http://127.0.0.1:8000 ./scripts/run-k6.sh
+```
+
+The runner refuses `K6_TARGET_ENV=production` and writes the machine-readable summary to `reports/k6/summary.json`.

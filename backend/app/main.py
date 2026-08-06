@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from prometheus_client import make_asgi_app
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend.app.api.router import build_api_router
@@ -13,6 +14,8 @@ from backend.app.core.errors import (
     unexpected_exception_handler,
 )
 from backend.app.db.session import dispose_database_engine
+from backend.app.observability.metrics import HTTP_REQUESTS
+from backend.app.security.authentication import build_oidc_jwt_validator
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -23,6 +26,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db_engine = None
     app.state.db_session_factory = None
     app.state.agent_run_executor = None
+    app.state.oidc_validator = None
+    if current_settings.app_env == "production":
+        assert current_settings.oidc_issuer is not None
+        assert current_settings.oidc_audience is not None
+        assert current_settings.oidc_jwks_url is not None
+        app.state.oidc_validator = build_oidc_jwt_validator(
+            issuer=current_settings.oidc_issuer,
+            audience=current_settings.oidc_audience,
+            jwks_url=current_settings.oidc_jwks_url,
+            clock_skew_seconds=current_settings.oidc_clock_skew_seconds,
+        )
     app.add_middleware(
         RequestBodyLimitMiddleware,
         max_body_bytes=current_settings.max_request_body_bytes,
@@ -39,12 +53,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "X-Correlation-ID",
             "X-Development-Principal-ID",
             "X-Development-Workspace-ID",
+            "X-Workspace-ID",
+            "Authorization",
         ],
     )
     app.add_exception_handler(RequestValidationError, request_validation_exception_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, unexpected_exception_handler)
     app.include_router(build_api_router(current_settings), prefix=current_settings.api_v1_prefix)
+    app.mount("/metrics", make_asgi_app())
+
+    @app.middleware("http")
+    async def record_request_metrics(request: Request, call_next: object) -> object:
+        response = await call_next(request)  # type: ignore[operator]
+        HTTP_REQUESTS.labels(method=request.method, status=str(response.status_code)).inc()
+        return response
 
     async def close_database_engine() -> None:
         await dispose_database_engine(app)

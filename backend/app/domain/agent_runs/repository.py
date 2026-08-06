@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.domain.agent_runs.models import AgentRun, AgentRunEvent, ConversationMessage
@@ -13,14 +13,20 @@ class AgentRunRepository:
         self.session = session
 
     async def create_run(
-        self, *, workspace_id: str, principal_id: str, question: str, correlation_id: str
+        self,
+        *,
+        workspace_id: str,
+        principal_id: str,
+        question: str,
+        correlation_id: str,
+        executor_mode: str,
     ) -> AgentRun:
         run = AgentRun(
             workspace_id=workspace_id,
             principal_id=principal_id,
             question=question,
             status="queued",
-            executor_mode="development_only",
+            executor_mode=executor_mode,
             correlation_id=correlation_id,
         )
         self.session.add(run)
@@ -33,6 +39,16 @@ class AgentRunRepository:
         statement = select(AgentRun).where(AgentRun.id == run_id)
         if lock:
             statement = statement.with_for_update()
+        return await self.session.scalar(statement)
+
+    async def claim_queued_run(self, run_id: UUID) -> AgentRun | None:
+        """Claim a run exactly once even when a broker redelivers its task."""
+        statement = (
+            update(AgentRun)
+            .where(AgentRun.id == run_id, AgentRun.status == "queued")
+            .values(status="running")
+            .returning(AgentRun)
+        )
         return await self.session.scalar(statement)
 
     async def append_event(self, run: AgentRun, event_type: str, payload: dict[str, object]) -> AgentRunEvent:

@@ -7,7 +7,10 @@ import asyncio
 import os
 import time
 from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
+import jwt
 import pytest
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -23,12 +26,18 @@ if TEST_DATABASE_URL:
     from alembic.config import Config
     from fastapi import Request
     from fastapi.testclient import TestClient
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
 
     from backend.app.api.v1.agent_runs import get_development_run_executor
     from backend.app.core.config import Settings
-    from backend.app.db.session import get_request_session_factory
+    from backend.app.db.session import create_session_factory, get_request_session_factory
     from backend.app.domain.agent_runs.executor import DevelopmentRunExecutor
+    from backend.app.domain.agent_runs.repository import AgentRunRepository
+    from backend.app.domain.agent_runs.service import AgentRunService, DevelopmentPrincipal
     from backend.app.main import create_app
+    from backend.app.security.authentication import OidcJwtValidator, OidcSettings
+    from backend.app.workers.tasks import run_agent
 
 
 DEMO_HEADERS = {
@@ -137,3 +146,171 @@ def test_executor_timeout_persists_a_failed_terminal_run(client: "TestClient") -
                 break
             time.sleep(0.1)
         assert current.json()["status"] == "failed"
+
+
+async def _seed_active_membership() -> None:
+    settings = Settings(app_env="test", database_url=TEST_DATABASE_URL)
+    engine = create_async_engine(settings.async_database_url)
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "DELETE FROM workspace_memberships "
+                "WHERE workspace_id = :workspace_id AND user_id = :user_id"
+            ),
+            {"workspace_id": "workspace-oidc", "user_id": "oidc-user"},
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO workspace_memberships "
+                "(id, workspace_id, user_id, role, is_human) "
+                "VALUES (:id, :workspace_id, :user_id, :role, :is_human)"
+            ),
+            {
+                "id": uuid4(),
+                "workspace_id": "workspace-oidc",
+                "user_id": "oidc-user",
+                "role": "analyst",
+                "is_human": True,
+            },
+        )
+    await engine.dispose()
+
+
+def test_production_bearer_token_uses_active_workspace_membership() -> None:
+    """A real FastAPI request succeeds only after JWT validation and local membership lookup."""
+    config = Config("backend/alembic.ini")
+    config.set_main_option("sqlalchemy.url", TEST_DATABASE_URL or "")
+    command.upgrade(config, "head")
+    asyncio.run(_seed_active_membership())
+    signing_key = "test-signing-key-with-at-least-thirty-two-bytes"
+    oidc = OidcSettings(
+        issuer="https://issuer.example", audience="investment-api", allowed_algorithms=("HS256",)
+    )
+    now = datetime.now(UTC)
+    token = jwt.encode(
+        {
+            "sub": "oidc-user",
+            "iss": oidc.issuer,
+            "aud": oidc.audience,
+            "exp": now + timedelta(minutes=5),
+            "nbf": now - timedelta(seconds=1),
+            "jti": "oidc-token-1",
+            "scope": "agent:run",
+            "typ": "access",
+        },
+        signing_key,
+        algorithm="HS256",
+        headers={"kid": "test-key"},
+    )
+    app = create_app(
+        Settings(
+            app_env="production",
+            database_url=TEST_DATABASE_URL,
+            oidc_issuer=oidc.issuer,
+            oidc_audience=oidc.audience,
+            oidc_jwks_url="https://issuer.example/.well-known/jwks.json",
+        )
+    )
+    app.state.oidc_validator = OidcJwtValidator(oidc, key_resolver=lambda _kid: signing_key)
+
+    class NoopExecutor:
+        def submit(self, *_: object) -> None:
+            return None
+
+    app.dependency_overrides[get_development_run_executor] = NoopExecutor
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.post(
+            "/api/v1/agent/runs",
+            json={"question": "验证 OIDC 成员关系"},
+            headers={"Authorization": f"Bearer {token}", "X-Workspace-ID": "workspace-oidc"},
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["id"]
+
+
+def test_worker_claims_and_completes_a_queued_agent_run(client: "TestClient") -> None:
+    """The worker must atomically claim durable work and persist its terminal state."""
+    from backend.app.workers.agent_runs import execute_claimed_agent_run
+
+    class NoopExecutor:
+        def submit(self, *_: object) -> None:
+            return None
+
+    client.app.dependency_overrides[get_development_run_executor] = NoopExecutor
+    created = client.post(
+        "/api/v1/agent/runs",
+        json={"question": "验证 worker claim 生命周期"},
+        headers=DEMO_HEADERS,
+    )
+    run_id = created.json()["id"]
+
+    outcome = asyncio.run(
+        execute_claimed_agent_run(
+            run_id=run_id,
+            workspace_id="workspace-a",
+            principal_id="analyst-1",
+            settings=Settings(app_env="test", database_url=TEST_DATABASE_URL),
+        )
+    )
+
+    completed = client.get(f"/api/v1/agent/runs/{run_id}", headers=DEMO_HEADERS)
+    assert outcome == "completed"
+    assert completed.json()["status"] == "completed"
+
+
+def test_worker_retry_requeues_a_claimed_run_and_records_an_event(client: "TestClient") -> None:
+    """Only a worker-owned running task may schedule a durable retry."""
+    class NoopExecutor:
+        def submit(self, *_: object) -> None:
+            return None
+
+    client.app.dependency_overrides[get_development_run_executor] = NoopExecutor
+    created = client.post(
+        "/api/v1/agent/runs",
+        json={"question": "验证 worker retry 生命周期"},
+        headers=DEMO_HEADERS,
+    )
+    run_id = created.json()["id"]
+    settings = Settings(app_env="test", database_url=TEST_DATABASE_URL)
+
+    async def claim_and_retry() -> bool:
+        async with create_session_factory(settings)() as session:
+            service = AgentRunService(AgentRunRepository(session))
+            principal = DevelopmentPrincipal(principal_id="analyst-1", workspace_id="workspace-a")
+            assert await service.claim(UUID(run_id), principal)
+            return await service.schedule_retry(UUID(run_id), principal, error_code="provider_temporarily_unavailable")
+
+    assert asyncio.run(claim_and_retry()) is True
+    retried = client.get(f"/api/v1/agent/runs/{run_id}", headers=DEMO_HEADERS)
+    events = client.get(f"/api/v1/agent/runs/{run_id}/events", headers=DEMO_HEADERS)
+    assert retried.json()["status"] == "queued"
+    assert "event: run.retry_scheduled" in events.text
+
+
+@pytest.mark.skipif(
+    os.environ.get("CELERY_INTEGRATION") != "1",
+    reason="CELERY_INTEGRATION=1 requires an isolated Redis broker and live worker",
+)
+def test_live_celery_worker_claims_and_completes_a_queued_run(client: "TestClient") -> None:
+    """Exercises broker delivery, worker claim, and terminal persistence end-to-end."""
+    class NoopExecutor:
+        def submit(self, *_: object) -> None:
+            return None
+
+    client.app.dependency_overrides[get_development_run_executor] = NoopExecutor
+    created = client.post(
+        "/api/v1/agent/runs",
+        json={"question": "验证 live Celery worker 生命周期"},
+        headers=DEMO_HEADERS,
+    )
+    run_id = created.json()["id"]
+    run_agent.apply_async(args=(run_id, "workspace-a", "analyst-1"), queue="agent")
+    for _ in range(40):
+        current = client.get(f"/api/v1/agent/runs/{run_id}", headers=DEMO_HEADERS)
+        if current.json()["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.1)
+
+    assert current.json()["status"] == "completed"
