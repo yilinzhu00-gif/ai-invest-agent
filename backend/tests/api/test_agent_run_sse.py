@@ -20,11 +20,17 @@ class FakeAgentRunService:
     def __init__(self) -> None:
         self.runs: dict[UUID, SimpleNamespace] = {}
 
-    async def create(self, principal: object, question: str, correlation_id: str) -> SimpleNamespace:
+    async def create(
+        self,
+        principal: object,
+        question: str,
+        correlation_id: str,
+        executor_mode: str = "development_only",
+    ) -> SimpleNamespace:
         run = SimpleNamespace(
             id=uuid4(),
             status=AgentRunStatus.QUEUED.value,
-            executor_mode="development_only",
+            executor_mode=executor_mode,
             created_at=datetime.now(UTC),
             principal=principal,
             question=question,

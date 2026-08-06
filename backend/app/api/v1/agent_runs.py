@@ -28,6 +28,7 @@ from backend.app.domain.identity.repository import WorkspaceMembershipRepository
 from backend.app.security.authentication import JwtValidationError, OidcJwtValidator
 from backend.app.security.authorization import AuthorizationError, require_permission
 from backend.app.security.principal import Principal
+from backend.app.workers.dispatch import CeleryRunExecutor
 
 router = APIRouter(prefix="/agent/runs", tags=["agent-runs"])
 
@@ -46,7 +47,7 @@ async def get_development_principal(
 
 async def get_authenticated_principal(
     request: Request,
-    session: AsyncSession,
+    session: AsyncSession | None = None,
     authorization: str | None = None,
     workspace_id: str | None = None,
     development_principal_id: str | None = None,
@@ -68,9 +69,15 @@ async def get_authenticated_principal(
         claims = validator.validate(authorization.removeprefix("Bearer ").strip())
     except JwtValidationError as error:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED) from error
-    membership = await WorkspaceMembershipRepository(session).get_active(
-        workspace_id=workspace_id, user_id=str(claims["sub"])
-    )
+    if session is None:
+        async with get_request_session_factory(request)() as membership_session:
+            membership = await WorkspaceMembershipRepository(membership_session).get_active(
+                workspace_id=workspace_id, user_id=str(claims["sub"])
+            )
+    else:
+        membership = await WorkspaceMembershipRepository(session).get_active(
+            workspace_id=workspace_id, user_id=str(claims["sub"])
+        )
     if membership is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
     return Principal(
@@ -86,7 +93,6 @@ async def get_authenticated_principal(
 
 async def get_request_principal(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_db_session)],
     authorization: Annotated[str | None, Header(alias="Authorization")] = None,
     workspace_id: Annotated[str | None, Header(alias="X-Workspace-ID")] = None,
     development_principal_id: Annotated[
@@ -98,7 +104,6 @@ async def get_request_principal(
 ) -> RunPrincipal:
     return await get_authenticated_principal(
         request=request,
-        session=session,
         authorization=authorization,
         workspace_id=workspace_id,
         development_principal_id=development_principal_id,
@@ -121,6 +126,8 @@ async def get_agent_run_service(
 
 
 def get_development_run_executor(request: Request) -> DevelopmentRunExecutor:
+    if request.app.state.settings.app_env == "production":
+        return CeleryRunExecutor()  # type: ignore[return-value]
     executor = request.app.state.agent_run_executor
     if executor is None:
         executor = DevelopmentRunExecutor(
@@ -151,7 +158,10 @@ async def create_agent_run(
     executor: Annotated[DevelopmentRunExecutor, Depends(get_development_run_executor)],
 ) -> AgentRunResponse:
     require_agent_run_permission(principal)
-    run = await service.create(principal, payload.question, get_correlation_id(request))
+    executor_mode = "celery" if request.app.state.settings.app_env == "production" else "development_only"
+    run = await service.create(
+        principal, payload.question, get_correlation_id(request), executor_mode=executor_mode
+    )
     executor.submit(run.id, principal)
     return AgentRunResponse.from_model(run)
 

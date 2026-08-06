@@ -37,7 +37,11 @@ class AgentRunService:
         self.repository = repository
 
     async def create(
-        self, principal: RunPrincipal, question: str, correlation_id: str
+        self,
+        principal: RunPrincipal,
+        question: str,
+        correlation_id: str,
+        executor_mode: str = "development_only",
     ) -> AgentRun:
         await self._set_rls_context(principal)
         run = await self.repository.create_run(
@@ -45,6 +49,7 @@ class AgentRunService:
             principal_id=principal.principal_id,
             question=question,
             correlation_id=correlation_id,
+            executor_mode=executor_mode,
         )
         await self.repository.session.commit()
         await self.repository.session.refresh(run)
@@ -56,6 +61,42 @@ class AgentRunService:
         self._authorize(run, principal)
         assert run is not None
         return run
+
+    async def claim(self, run_id: UUID, principal: RunPrincipal) -> AgentRun | None:
+        """Atomically move a durable queued run to running for one worker delivery."""
+        await self._set_rls_context(principal)
+        run = await self.repository.claim_queued_run(run_id)
+        if run is None:
+            await self.repository.session.rollback()
+            return None
+        await self.repository.append_event(run, "run.started", {})
+        await self.repository.session.commit()
+        return run
+
+    async def is_running(self, run_id: UUID, principal: RunPrincipal) -> bool:
+        run = await self.get(run_id, principal)
+        return run.status == AgentRunStatus.RUNNING.value
+
+    async def schedule_retry(
+        self, run_id: UUID, principal: RunPrincipal, *, error_code: str
+    ) -> bool:
+        """Persist a transient failure before Celery asks the broker to redeliver it."""
+        await self._set_rls_context(principal)
+        run = await self.repository.get_run(run_id, lock=True)
+        self._authorize(run, principal)
+        assert run is not None
+        if run.status != AgentRunStatus.RUNNING.value:
+            await self.repository.session.rollback()
+            return False
+        run.status = AgentRunStatus.QUEUED.value
+        run.attempt_count += 1
+        await self.repository.append_event(
+            run,
+            "run.retry_scheduled",
+            {"attempt": run.attempt_count, "error_code": error_code},
+        )
+        await self.repository.session.commit()
+        return True
 
     async def list_events(
         self, run_id: UUID, principal: RunPrincipal, after_sequence: int

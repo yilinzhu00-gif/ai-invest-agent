@@ -1,10 +1,16 @@
 """Celery configuration with isolated queues and no result-backend business state."""
 
+import os
+
 from celery import Celery  # type: ignore[import-untyped]
 
 
-def create_celery_app(broker_url: str = "redis://localhost:6379/0") -> Celery:
-    app = Celery("investment_agent", broker=broker_url)
+def create_celery_app(broker_url: str | None = None) -> Celery:
+    app = Celery(
+        "investment_agent",
+        broker=broker_url or os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+        include=["backend.app.workers.tasks"],
+    )
     app.conf.update(
         task_default_queue="agent",
         task_routes={

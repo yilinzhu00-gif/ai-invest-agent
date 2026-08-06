@@ -8,7 +8,7 @@ import os
 import time
 from collections.abc import Generator
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import jwt
 import pytest
@@ -31,10 +31,13 @@ if TEST_DATABASE_URL:
 
     from backend.app.api.v1.agent_runs import get_development_run_executor
     from backend.app.core.config import Settings
-    from backend.app.db.session import get_request_session_factory
+    from backend.app.db.session import create_session_factory, get_request_session_factory
     from backend.app.domain.agent_runs.executor import DevelopmentRunExecutor
+    from backend.app.domain.agent_runs.repository import AgentRunRepository
+    from backend.app.domain.agent_runs.service import AgentRunService, DevelopmentPrincipal
     from backend.app.main import create_app
     from backend.app.security.authentication import OidcJwtValidator, OidcSettings
+    from backend.app.workers.tasks import run_agent
 
 
 DEMO_HEADERS = {
@@ -225,3 +228,89 @@ def test_production_bearer_token_uses_active_workspace_membership() -> None:
     assert response.status_code == 202
     assert response.json()["status"] == "queued"
     assert response.json()["id"]
+
+
+def test_worker_claims_and_completes_a_queued_agent_run(client: "TestClient") -> None:
+    """The worker must atomically claim durable work and persist its terminal state."""
+    from backend.app.workers.agent_runs import execute_claimed_agent_run
+
+    class NoopExecutor:
+        def submit(self, *_: object) -> None:
+            return None
+
+    client.app.dependency_overrides[get_development_run_executor] = NoopExecutor
+    created = client.post(
+        "/api/v1/agent/runs",
+        json={"question": "验证 worker claim 生命周期"},
+        headers=DEMO_HEADERS,
+    )
+    run_id = created.json()["id"]
+
+    outcome = asyncio.run(
+        execute_claimed_agent_run(
+            run_id=run_id,
+            workspace_id="workspace-a",
+            principal_id="analyst-1",
+            settings=Settings(app_env="test", database_url=TEST_DATABASE_URL),
+        )
+    )
+
+    completed = client.get(f"/api/v1/agent/runs/{run_id}", headers=DEMO_HEADERS)
+    assert outcome == "completed"
+    assert completed.json()["status"] == "completed"
+
+
+def test_worker_retry_requeues_a_claimed_run_and_records_an_event(client: "TestClient") -> None:
+    """Only a worker-owned running task may schedule a durable retry."""
+    class NoopExecutor:
+        def submit(self, *_: object) -> None:
+            return None
+
+    client.app.dependency_overrides[get_development_run_executor] = NoopExecutor
+    created = client.post(
+        "/api/v1/agent/runs",
+        json={"question": "验证 worker retry 生命周期"},
+        headers=DEMO_HEADERS,
+    )
+    run_id = created.json()["id"]
+    settings = Settings(app_env="test", database_url=TEST_DATABASE_URL)
+
+    async def claim_and_retry() -> bool:
+        async with create_session_factory(settings)() as session:
+            service = AgentRunService(AgentRunRepository(session))
+            principal = DevelopmentPrincipal(principal_id="analyst-1", workspace_id="workspace-a")
+            assert await service.claim(UUID(run_id), principal)
+            return await service.schedule_retry(UUID(run_id), principal, error_code="provider_temporarily_unavailable")
+
+    assert asyncio.run(claim_and_retry()) is True
+    retried = client.get(f"/api/v1/agent/runs/{run_id}", headers=DEMO_HEADERS)
+    events = client.get(f"/api/v1/agent/runs/{run_id}/events", headers=DEMO_HEADERS)
+    assert retried.json()["status"] == "queued"
+    assert "event: run.retry_scheduled" in events.text
+
+
+@pytest.mark.skipif(
+    os.environ.get("CELERY_INTEGRATION") != "1",
+    reason="CELERY_INTEGRATION=1 requires an isolated Redis broker and live worker",
+)
+def test_live_celery_worker_claims_and_completes_a_queued_run(client: "TestClient") -> None:
+    """Exercises broker delivery, worker claim, and terminal persistence end-to-end."""
+    class NoopExecutor:
+        def submit(self, *_: object) -> None:
+            return None
+
+    client.app.dependency_overrides[get_development_run_executor] = NoopExecutor
+    created = client.post(
+        "/api/v1/agent/runs",
+        json={"question": "验证 live Celery worker 生命周期"},
+        headers=DEMO_HEADERS,
+    )
+    run_id = created.json()["id"]
+    run_agent.apply_async(args=(run_id, "workspace-a", "analyst-1"), queue="agent")
+    for _ in range(40):
+        current = client.get(f"/api/v1/agent/runs/{run_id}", headers=DEMO_HEADERS)
+        if current.json()["status"] in {"completed", "failed", "cancelled"}:
+            break
+        time.sleep(0.1)
+
+    assert current.json()["status"] == "completed"
