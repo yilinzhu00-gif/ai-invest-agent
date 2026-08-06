@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:3000"
     database_url: str | None = None
+    oidc_issuer: str | None = None
+    oidc_audience: str | None = None
+    oidc_jwks_url: str | None = None
+    oidc_clock_skew_seconds: int = Field(default=30, ge=0, le=300)
     db_pool_size: int = 5
     db_max_overflow: int = 10
     db_connect_timeout: float = 5.0
@@ -39,6 +43,12 @@ class Settings(BaseSettings):
     def require_database_url_in_production(self) -> "Settings":
         if self.app_env == "production" and not self.database_url:
             raise ValueError("DATABASE_URL is required when APP_ENV is production")
+        if self.app_env == "production" and not self.oidc_issuer:
+            raise ValueError("OIDC_ISSUER is required when APP_ENV is production")
+        if self.app_env == "production" and not self.oidc_audience:
+            raise ValueError("OIDC_AUDIENCE is required when APP_ENV is production")
+        if self.app_env == "production" and not self.oidc_jwks_url:
+            raise ValueError("OIDC_JWKS_URL is required when APP_ENV is production")
         return self
 
     @field_validator("cors_origins")

@@ -13,7 +13,7 @@ from backend.app.agents.schemas import AgentRuntime, Citation, ResearchRequest
 from backend.app.core.config import Settings
 from backend.app.domain.agent_runs.repository import AgentRunRepository
 from backend.app.domain.agent_runs.schemas import AgentRunStatus
-from backend.app.domain.agent_runs.service import AgentRunService, DevelopmentPrincipal
+from backend.app.domain.agent_runs.service import AgentRunService, RunPrincipal
 
 
 class DevelopmentRunExecutor:
@@ -26,12 +26,12 @@ class DevelopmentRunExecutor:
         self.settings = settings
         self.tasks: set[asyncio.Task[None]] = set()
 
-    def submit(self, run_id: UUID, principal: DevelopmentPrincipal) -> None:
+    def submit(self, run_id: UUID, principal: RunPrincipal) -> None:
         task = asyncio.create_task(self._execute(run_id, principal))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
 
-    async def _execute(self, run_id: UUID, principal: DevelopmentPrincipal) -> None:
+    async def _execute(self, run_id: UUID, principal: RunPrincipal) -> None:
         try:
             async with asyncio.timeout(self.settings.agent_run_timeout_seconds):
                 async with self.session_factory() as session:

@@ -6,7 +6,14 @@ from dataclasses import dataclass
 from typing import Any
 
 import jwt
-from jwt import ExpiredSignatureError, InvalidAudienceError, InvalidIssuerError, InvalidTokenError
+from jwt import (
+    ExpiredSignatureError,
+    InvalidAudienceError,
+    InvalidIssuerError,
+    InvalidTokenError,
+    PyJWKClient,
+)
+from jwt.exceptions import PyJWKClientError
 
 from backend.app.security.principal import Principal
 
@@ -55,7 +62,10 @@ class OidcJwtValidator:
     def validate(self, token: str) -> dict[str, Any]:
         try:
             header = jwt.get_unverified_header(token)
-            key = self.keys.resolve(header.get("kid"))
+            kid = header.get("kid")
+            if not isinstance(kid, str) or not kid:
+                raise JwtValidationError("missing_key_id")
+            key = self.keys.resolve(kid)
             claims = jwt.decode(
                 token,
                 key,
@@ -65,12 +75,16 @@ class OidcJwtValidator:
                 leeway=self.settings.clock_skew_seconds,
                 options={"require": ["sub", "iss", "aud", "exp", "nbf", "jti"]},
             )
+        except JwtValidationError:
+            raise
         except ExpiredSignatureError as error:
             raise JwtValidationError("token_expired") from error
         except InvalidIssuerError as error:
             raise JwtValidationError("invalid_issuer") from error
         except InvalidAudienceError as error:
             raise JwtValidationError("invalid_audience") from error
+        except PyJWKClientError as error:
+            raise JwtValidationError("jwk_unavailable") from error
         except InvalidTokenError as error:
             raise JwtValidationError("invalid_token") from error
         if claims.get("typ") != "access":
@@ -90,3 +104,14 @@ class OidcJwtValidator:
             authentication_method="oidc",
             is_human=is_human,
         )
+
+
+def build_oidc_jwt_validator(
+    *, issuer: str, audience: str, jwks_url: str, clock_skew_seconds: int
+) -> OidcJwtValidator:
+    """Build the production validator backed by the configured OIDC JWK provider."""
+    jwk_client = PyJWKClient(jwks_url)
+    return OidcJwtValidator(
+        OidcSettings(issuer=issuer, audience=audience, clock_skew_seconds=clock_skew_seconds),
+        key_resolver=lambda kid: jwk_client.get_signing_key(kid or "").key,
+    )

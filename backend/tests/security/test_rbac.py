@@ -56,3 +56,29 @@ def test_oidc_validator_rejects_expired_or_wrong_audience_tokens() -> None:
 
     with pytest.raises(JwtValidationError, match="token_expired"):
         validator.validate(expired)
+
+
+def test_oidc_validator_rejects_a_token_without_a_jwk_key_id() -> None:
+    settings = OidcSettings(
+        issuer="https://issuer.example", audience="investment-api", allowed_algorithms=("HS256",)
+    )
+    signing_key = "test-signing-key-with-at-least-thirty-two-bytes"
+    now = datetime.now(UTC)
+    token = jwt.encode(
+        {
+            "sub": "user-1",
+            "iss": settings.issuer,
+            "aud": settings.audience,
+            "exp": now + timedelta(minutes=5),
+            "nbf": now - timedelta(seconds=1),
+            "jti": "token-1",
+            "scope": "agent:run",
+            "typ": "access",
+        },
+        signing_key,
+        algorithm="HS256",
+    )
+    validator = OidcJwtValidator(settings, key_resolver=lambda _kid: signing_key)
+
+    with pytest.raises(JwtValidationError, match="missing_key_id"):
+        validator.validate(token)

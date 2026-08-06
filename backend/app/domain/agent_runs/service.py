@@ -8,6 +8,7 @@ from sqlalchemy import text
 from backend.app.domain.agent_runs.models import AgentRun, AgentRunEvent
 from backend.app.domain.agent_runs.repository import AgentRunRepository
 from backend.app.domain.agent_runs.schemas import AgentRunStatus
+from backend.app.security.principal import Principal
 
 TERMINAL_STATUSES = {
     AgentRunStatus.COMPLETED.value,
@@ -24,6 +25,9 @@ class DevelopmentPrincipal:
     workspace_id: str
 
 
+RunPrincipal = DevelopmentPrincipal | Principal
+
+
 class AgentRunNotFoundError(Exception):
     """Hide unauthorized resources behind the same not-found result."""
 
@@ -33,7 +37,7 @@ class AgentRunService:
         self.repository = repository
 
     async def create(
-        self, principal: DevelopmentPrincipal, question: str, correlation_id: str
+        self, principal: RunPrincipal, question: str, correlation_id: str
     ) -> AgentRun:
         await self._set_rls_context(principal)
         run = await self.repository.create_run(
@@ -46,7 +50,7 @@ class AgentRunService:
         await self.repository.session.refresh(run)
         return run
 
-    async def get(self, run_id: UUID, principal: DevelopmentPrincipal) -> AgentRun:
+    async def get(self, run_id: UUID, principal: RunPrincipal) -> AgentRun:
         await self._set_rls_context(principal)
         run = await self.repository.get_run(run_id)
         self._authorize(run, principal)
@@ -54,7 +58,7 @@ class AgentRunService:
         return run
 
     async def list_events(
-        self, run_id: UUID, principal: DevelopmentPrincipal, after_sequence: int
+        self, run_id: UUID, principal: RunPrincipal, after_sequence: int
     ) -> list[AgentRunEvent]:
         await self.get(run_id, principal)
         return await self.repository.list_events(run_id, after_sequence)
@@ -62,7 +66,7 @@ class AgentRunService:
     async def transition(
         self,
         run_id: UUID,
-        principal: DevelopmentPrincipal,
+        principal: RunPrincipal,
         status: AgentRunStatus,
         event_type: str,
         payload: dict[str, object] | None = None,
@@ -82,7 +86,7 @@ class AgentRunService:
     async def append_event(
         self,
         run_id: UUID,
-        principal: DevelopmentPrincipal,
+        principal: RunPrincipal,
         event_type: str,
         payload: dict[str, object],
     ) -> AgentRunEvent:
@@ -94,7 +98,7 @@ class AgentRunService:
         await self.repository.session.commit()
         return event
 
-    async def cancel(self, run_id: UUID, principal: DevelopmentPrincipal) -> AgentRun:
+    async def cancel(self, run_id: UUID, principal: RunPrincipal) -> AgentRun:
         await self._set_rls_context(principal)
         run = await self.repository.get_run(run_id, lock=True)
         self._authorize(run, principal)
@@ -108,7 +112,7 @@ class AgentRunService:
         return run
 
     @staticmethod
-    def _authorize(run: AgentRun | None, principal: DevelopmentPrincipal) -> None:
+    def _authorize(run: AgentRun | None, principal: RunPrincipal) -> None:
         if (
             run is None
             or run.workspace_id != principal.workspace_id
@@ -116,7 +120,7 @@ class AgentRunService:
         ):
             raise AgentRunNotFoundError
 
-    async def _set_rls_context(self, principal: DevelopmentPrincipal) -> None:
+    async def _set_rls_context(self, principal: RunPrincipal) -> None:
         await self.repository.session.execute(
             text("SELECT set_config('app.current_user_id', :user_id, true)"),
             {"user_id": principal.principal_id},

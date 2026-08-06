@@ -16,3 +16,13 @@ class Principal:
     def __post_init__(self) -> None:
         if "admin" in self.roles and not self.is_human:
             raise ValueError("admin role requires a human principal")
+
+    @property
+    def principal_id(self) -> str:
+        """Compatibility name used by workspace-scoped domain services."""
+        return self.user_id
+
+    @property
+    def workspace_id(self) -> str:
+        """Compatibility name used by workspace-scoped domain services."""
+        return self.active_workspace_id

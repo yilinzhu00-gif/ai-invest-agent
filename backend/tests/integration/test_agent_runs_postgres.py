@@ -7,7 +7,10 @@ import asyncio
 import os
 import time
 from collections.abc import Generator
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
+import jwt
 import pytest
 
 TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
@@ -23,12 +26,15 @@ if TEST_DATABASE_URL:
     from alembic.config import Config
     from fastapi import Request
     from fastapi.testclient import TestClient
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
 
     from backend.app.api.v1.agent_runs import get_development_run_executor
     from backend.app.core.config import Settings
     from backend.app.db.session import get_request_session_factory
     from backend.app.domain.agent_runs.executor import DevelopmentRunExecutor
     from backend.app.main import create_app
+    from backend.app.security.authentication import OidcJwtValidator, OidcSettings
 
 
 DEMO_HEADERS = {
@@ -137,3 +143,85 @@ def test_executor_timeout_persists_a_failed_terminal_run(client: "TestClient") -
                 break
             time.sleep(0.1)
         assert current.json()["status"] == "failed"
+
+
+async def _seed_active_membership() -> None:
+    settings = Settings(app_env="test", database_url=TEST_DATABASE_URL)
+    engine = create_async_engine(settings.async_database_url)
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "DELETE FROM workspace_memberships "
+                "WHERE workspace_id = :workspace_id AND user_id = :user_id"
+            ),
+            {"workspace_id": "workspace-oidc", "user_id": "oidc-user"},
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO workspace_memberships "
+                "(id, workspace_id, user_id, role, is_human) "
+                "VALUES (:id, :workspace_id, :user_id, :role, :is_human)"
+            ),
+            {
+                "id": uuid4(),
+                "workspace_id": "workspace-oidc",
+                "user_id": "oidc-user",
+                "role": "analyst",
+                "is_human": True,
+            },
+        )
+    await engine.dispose()
+
+
+def test_production_bearer_token_uses_active_workspace_membership() -> None:
+    """A real FastAPI request succeeds only after JWT validation and local membership lookup."""
+    config = Config("backend/alembic.ini")
+    config.set_main_option("sqlalchemy.url", TEST_DATABASE_URL or "")
+    command.upgrade(config, "head")
+    asyncio.run(_seed_active_membership())
+    signing_key = "test-signing-key-with-at-least-thirty-two-bytes"
+    oidc = OidcSettings(
+        issuer="https://issuer.example", audience="investment-api", allowed_algorithms=("HS256",)
+    )
+    now = datetime.now(UTC)
+    token = jwt.encode(
+        {
+            "sub": "oidc-user",
+            "iss": oidc.issuer,
+            "aud": oidc.audience,
+            "exp": now + timedelta(minutes=5),
+            "nbf": now - timedelta(seconds=1),
+            "jti": "oidc-token-1",
+            "scope": "agent:run",
+            "typ": "access",
+        },
+        signing_key,
+        algorithm="HS256",
+        headers={"kid": "test-key"},
+    )
+    app = create_app(
+        Settings(
+            app_env="production",
+            database_url=TEST_DATABASE_URL,
+            oidc_issuer=oidc.issuer,
+            oidc_audience=oidc.audience,
+            oidc_jwks_url="https://issuer.example/.well-known/jwks.json",
+        )
+    )
+    app.state.oidc_validator = OidcJwtValidator(oidc, key_resolver=lambda _kid: signing_key)
+
+    class NoopExecutor:
+        def submit(self, *_: object) -> None:
+            return None
+
+    app.dependency_overrides[get_development_run_executor] = NoopExecutor
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        response = test_client.post(
+            "/api/v1/agent/runs",
+            json={"question": "验证 OIDC 成员关系"},
+            headers={"Authorization": f"Bearer {token}", "X-Workspace-ID": "workspace-oidc"},
+        )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+    assert response.json()["id"]
