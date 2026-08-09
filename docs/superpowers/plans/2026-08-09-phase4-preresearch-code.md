@@ -13,6 +13,7 @@
 - Do not modify `backend/app/agents/flow.py`, Model Router, Tool Policy, database models, APIs, frontend, or deployment workflows.
 - Do not call external models, download weights, create GPU/Kubernetes resources, or use production data.
 - Synthetic observations may exist only inside tests and must never be reported as real Phase 4 evidence.
+- Positive evidence decisions require `REAL_ATTESTED` provenance with source reference, artifact SHA-256, collection time, and attester; synthetic or unverified inputs remain insufficient.
 - Keep Agent capabilities read-only, `allow_delegation=False`, and `max_calls=1`.
 - Default training readiness requires at least 300 approved train examples and 50--100 isolated holdout examples.
 - Do not stage or modify `.superpowers/`.
@@ -30,9 +31,9 @@
 - Produces: `AgentCapability`, `AgentExperimentArm`, `ExperimentObservation`, `ExperimentDecision`, and `evaluate_controlled_experiment(observations, policy) -> ExperimentDecision`.
 - Consumes: only validated offline observations; no runtime or model objects.
 
-- [ ] **Step 1: Write failing tests** for read-only capability enforcement, identical three-arm case sets, fewer than 100 cases, a +5pp within-budget GO, and a cost/latency NO-GO.
-- [ ] **Step 2: Run** `uv --cache-dir /private/tmp/p4-uv-cache run pytest backend/tests/agent_eval/test_controlled_experiment.py -q` and confirm import failure because the modules do not exist.
-- [ ] **Step 3: Implement** strict Pydantic contracts, nearest-rank p95, per-arm metrics, and comparison against the token-matched arm with these public signatures:
+- [x] **Step 1: Write failing tests** for read-only capability enforcement, identical three-arm case sets, fewer than 100 cases, a +5pp within-budget GO, and a cost/latency NO-GO.
+- [x] **Step 2: Run** `uv --cache-dir /private/tmp/p4-uv-cache run pytest backend/tests/agent_eval/test_controlled_experiment.py -q` and confirm import failure because the modules do not exist.
+- [x] **Step 3: Implement** strict Pydantic contracts, case input digests, nearest-rank p95, per-arm metrics, and comparison against the model-and-token-matched arm with these public signatures:
 
 ```python
 class AgentExperimentArm(StrEnum):
@@ -55,8 +56,8 @@ def evaluate_controlled_experiment(
     observations: Sequence[ExperimentObservation], policy: ExperimentPolicy
 ) -> ExperimentDecision: ...
 ```
-- [ ] **Step 4: Re-run the test** and confirm all Task 1 cases pass.
-- [ ] **Step 5: Commit** only Task 1 files with `feat(agents): add controlled specialist experiment gate`.
+- [x] **Step 4: Re-run the test** and confirm all Task 1 cases pass.
+- [x] **Step 5: Commit** only Task 1 files with `feat(agents): add controlled specialist experiment gate`.
 
 ### Task 2: Backend benchmark evidence model
 
@@ -69,9 +70,9 @@ def evaluate_controlled_experiment(
 - Produces: `BackendModule`, `BackendKind`, `BackendDescriptor`, `BenchmarkObservation`, `BenchmarkSummary`, `BackendComparison`, `summarize_observations()` and `compare_backends()`.
 - Consumes: observations produced by separately run OCR/Embedding/Rerank/Generation benchmarks.
 
-- [ ] **Step 1: Write failing tests** for mixed-backend rejection, literal p50/p95/cost/failure summaries, insufficient evidence, quality regression, and a comparable candidate.
-- [ ] **Step 2: Run** `uv --cache-dir /private/tmp/p4-uv-cache run pytest backend/tests/unit/benchmarks/test_backends.py -q` and confirm import failure.
-- [ ] **Step 3: Implement** strict contracts, nearest-rank percentiles, serial throughput, case-set equality, quality floor/drop gates, and `INSUFFICIENT_EVIDENCE | NO_GO | EVIDENCE_READY` decisions with these public signatures:
+- [x] **Step 1: Write failing tests** for mixed-backend rejection, literal p50/p95/cost/failure summaries, insufficient evidence, quality regression, and a comparable candidate.
+- [x] **Step 2: Run** `uv --cache-dir /private/tmp/p4-uv-cache run pytest backend/tests/unit/benchmarks/test_backends.py -q` and confirm import failure.
+- [x] **Step 3: Implement** strict contracts, dataset/case digests, nearest-rank percentiles, serial throughput, decimal quality floor/drop gates, and `INSUFFICIENT_EVIDENCE | NO_GO | EVIDENCE_READY` decisions with these public signatures:
 
 ```python
 class BackendModule(StrEnum):
@@ -90,8 +91,8 @@ def compare_backends(
     policy: BackendComparisonPolicy,
 ) -> BackendComparison: ...
 ```
-- [ ] **Step 4: Re-run the test** and confirm all Task 2 cases pass.
-- [ ] **Step 5: Commit** only Task 2 files with `feat(benchmarks): add backend evidence comparison`.
+- [x] **Step 4: Re-run the test** and confirm all Task 2 cases pass.
+- [x] **Step 5: Commit** only Task 2 files with `feat(benchmarks): add backend evidence comparison`.
 
 ### Task 3: Training candidate governance and export readiness
 
@@ -105,23 +106,25 @@ def compare_backends(
 - Produces: `TrainingCandidate`, `CandidateStatus`, `TrainingSplit`, `TrainingExportPolicy`, `TrainingExample`, `TrainingExportReport`, and `prepare_training_export(candidates, holdout_groups, policy) -> TrainingExportReport`.
 - Consumes: `DataClassification` and `redact_sensitive_text()` from existing security modules.
 
-- [ ] **Step 1: Write failing tests** for approved metadata, unknown fields, license/authorization failure, PII/Secret failure, deterministic group split/hash, duplicate IDs, and default readiness counts.
-- [ ] **Step 2: Run** `uv --cache-dir /private/tmp/p4-uv-cache run pytest backend/tests/unit/training/test_export.py -q` and confirm import failure.
-- [ ] **Step 3: Implement** fail-closed candidate validation, sensitive-text detection by redaction comparison, deterministic group assignment, canonical JSON hashing, rejection reasons, and readiness thresholds with these public signatures:
+- [x] **Step 1: Write failing tests** for approved metadata, unknown fields, license/authorization failure, PII/Secret failure, deterministic group split/hash, duplicate IDs, and default readiness counts.
+- [x] **Step 2: Run** `uv --cache-dir /private/tmp/p4-uv-cache run pytest backend/tests/unit/training/test_export.py -q` and confirm import failure.
+- [x] **Step 3: Implement** fail-closed candidate validation, exported-text Secret/PII detection, source-run/document split isolation, canonical JSON hashing, rejection reasons, and readiness thresholds with these public signatures:
 
 ```python
 class TrainingCandidate(BaseModel):
     sample_id: str
     task_type: str
     source_run_id: UUID
+    source_document_id: str
+    source_content_sha256: str
     workspace_id: UUID
     classification: DataClassification
     input_text: str
     expected_output: str
     tool_names: tuple[str, ...]
     labels: tuple[str, ...]
-    approver_id: str
-    approved_at: datetime
+    approver_id: str | None
+    approved_at: datetime | None
     license_id: str
     license_allows_training: bool
     training_authorized: bool
@@ -132,11 +135,11 @@ def prepare_training_export(
     candidates: Sequence[TrainingCandidate],
     *,
     holdout_groups: frozenset[str],
-    policy: TrainingExportPolicy = TrainingExportPolicy(),
+    policy: TrainingExportPolicy | None = None,
 ) -> TrainingExportReport: ...
 ```
-- [ ] **Step 4: Re-run the test** and confirm all Task 3 cases pass.
-- [ ] **Step 5: Commit** only Task 3 files with `feat(training): add governed candidate export gate`.
+- [x] **Step 4: Re-run the test** and confirm all Task 3 cases pass.
+- [x] **Step 5: Commit** only Task 3 files with `feat(training): add governed candidate export gate`.
 
 ### Task 4: Platform capacity readiness gate
 
@@ -150,26 +153,28 @@ def prepare_training_export(
 - Produces: `CapacityEvidence`, `PlatformScaleDecision`, and `evaluate_platform_scale(evidence) -> PlatformScaleDecision`.
 - Consumes: only approved offline evidence fields; no cluster or cloud clients.
 
-- [ ] **Step 1: Write failing tests** for fewer than 8 weeks, missing owner/budget/rollback, no technical trigger, and a fully evidenced `EVIDENCE_READY` result.
-- [ ] **Step 2: Run** `uv --cache-dir /private/tmp/p4-uv-cache run pytest backend/tests/unit/platform/test_capacity.py -q` and confirm import failure.
-- [ ] **Step 3: Implement** strict capacity evidence and the conjunction of observation window, technical trigger, owner, budget, and rollback prerequisites with these public signatures:
+- [x] **Step 1: Write failing tests** for fewer than 8 weeks, missing owner/budget/rollback, no technical trigger, and a fully evidenced `EVIDENCE_READY` result.
+- [x] **Step 2: Run** `uv --cache-dir /private/tmp/p4-uv-cache run pytest backend/tests/unit/platform/test_capacity.py -q` and confirm import failure.
+- [x] **Step 3: Implement** strict capacity evidence and the conjunction of observation window, technical trigger, owner, budget, and rollback prerequisites with these public signatures:
 
 ```python
 class CapacityEvidence(BaseModel):
     observed_weeks: int
+    provenance: EvidenceProvenance
     ha_or_rto_missed: bool = False
     worker_scale_still_violates_slo: bool = False
     release_boundary_incidents: int = 0
     database_optimized_still_insufficient: bool = False
+    trigger_evidence_refs: dict[str, str] = Field(default_factory=dict)
     platform_owner: str | None = None
-    budget_approved: bool = False
-    rollback_drilled: bool = False
+    budget_approval_ref: str | None = None
+    rollback_drill_ref: str | None = None
 
 def evaluate_platform_scale(evidence: CapacityEvidence) -> PlatformScaleDecision: ...
 ```
-- [ ] **Step 4: Re-run the test** and confirm all Task 4 cases pass.
-- [ ] **Step 5: Add the ADR** documenting that these modules are pre-research evidence tooling, not Phase 4 activation.
-- [ ] **Step 6: Commit** only Task 4 files and the ADR with `feat(platform): add scale evidence readiness gate`.
+- [x] **Step 4: Re-run the test** and confirm all Task 4 cases pass.
+- [x] **Step 5: Add the ADR** documenting that these modules are pre-research evidence tooling, not Phase 4 activation.
+- [x] **Step 6: Commit** only Task 4 files and the ADR with `feat(platform): add scale evidence readiness gate`.
 
 ### Task 5: Integration verification
 
@@ -179,7 +184,7 @@ def evaluate_platform_scale(evidence: CapacityEvidence) -> PlatformScaleDecision
 **Interfaces:**
 - Documents exact offline commands and the distinction between evidence tooling and real runtime validation.
 
-- [ ] **Step 1: Document** the three evidence tools and platform gate without claiming real Phase 4 evidence using these exact headings and command forms:
+- [x] **Step 1: Document** the three evidence tools and platform gate without claiming real Phase 4 evidence using these exact headings and command forms:
 
 ```markdown
 ## 阶段四预研证据工具
@@ -188,9 +193,9 @@ def evaluate_platform_scale(evidence: CapacityEvidence) -> PlatformScaleDecision
 - `python -m backend.app.benchmarks.backends --control <control.jsonl> --candidate <candidate.jsonl>`
 - 训练导出和平台扩容判断只通过 Python API 使用，默认门禁不足时不产生可用训练集或平台实施批准。
 ```
-- [ ] **Step 2: Run** `uv --cache-dir /private/tmp/p4-uv-cache run ruff check backend tests`.
-- [ ] **Step 3: Run** `uv --cache-dir /private/tmp/p4-uv-cache run mypy backend`.
-- [ ] **Step 4: Run** `uv --cache-dir /private/tmp/p4-uv-cache run pytest -q`.
-- [ ] **Step 5: Run** frontend lint, typecheck, tests, and build because the repository acceptance gate requires them even though frontend is unchanged.
-- [ ] **Step 6: Run** development Compose config and `git diff --check`.
-- [ ] **Step 7: Commit** documentation with `docs: document phase four pre-research evidence tools`.
+- [x] **Step 2: Run** `uv --cache-dir /private/tmp/p4-uv-cache run ruff check backend tests`.
+- [x] **Step 3: Run** `uv --cache-dir /private/tmp/p4-uv-cache run mypy backend/app legacy/scoring.py` to match Backend CI; `mypy backend` also scans test and Alembic files that are outside the repository's configured gate.
+- [x] **Step 4: Run** `uv --cache-dir /private/tmp/p4-uv-cache run pytest -q`.
+- [x] **Step 5: Run** frontend lint, typecheck, tests, and build because the repository acceptance gate requires them even though frontend is unchanged.
+- [x] **Step 6: Run** development Compose config and `git diff --check`.
+- [x] **Step 7: Commit** documentation with `docs: document phase four pre-research evidence tools`.
