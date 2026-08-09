@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -220,6 +220,32 @@ describe("agent run panel", () => {
     expect(screen.getByText("状态：completed")).toBeInTheDocument();
     expect(screen.queryByText("状态：cancelled")).not.toBeInTheDocument();
     expect(localStorage.getItem("investment-agent:last-run")).toBe(secondRunId);
+  });
+
+  it("keeps tracking the run after cancellation fails", async () => {
+    const runId = "00000000-0000-0000-0000-000000000011";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ id: runId, status: "running", executor_mode: "development_only" }))
+      .mockResolvedValueOnce(response("event: heartbeat\ndata: {}\n\n", 200, "text/event-stream"))
+      .mockResolvedValueOnce(response({ id: runId, status: "running", executor_mode: "development_only" }))
+      .mockResolvedValueOnce(response({ detail: "cancel failed" }, 500))
+      .mockResolvedValueOnce(response(
+        "id: 1\nevent: text.delta\ndata: {\"text\":\"原任务继续完成\"}\n\n",
+        200,
+        "text/event-stream",
+      ))
+      .mockResolvedValueOnce(response({ id: runId, status: "completed", executor_mode: "development_only" }));
+    vi.stubGlobal("fetch", fetchMock);
+    localStorage.setItem("investment-agent:last-run", runId);
+    const user = userEvent.setup();
+
+    render(<AgentRunPanel />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await user.click(screen.getByRole("button", { name: "取消任务" }));
+
+    expect(await screen.findByText("无法取消研究任务，请稍后重试。")).toBeInTheDocument();
+    expect(await screen.findByText("状态：completed", {}, { timeout: 2_000 })).toBeInTheDocument();
+    expect(screen.getByText("原任务继续完成")).toBeInTheDocument();
   });
 
   it("cancels a restored non-terminal run", async () => {

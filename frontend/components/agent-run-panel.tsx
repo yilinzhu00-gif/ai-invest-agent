@@ -39,6 +39,7 @@ export function AgentRunPanel() {
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const activeSubscription = useRef<AbortController | null>(null);
+  const cancelRequest = useRef<AbortController | null>(null);
 
   function replaceActiveSubscription() {
     activeSubscription.current?.abort();
@@ -83,15 +84,21 @@ export function AgentRunPanel() {
   }
 
   useEffect(() => {
+    cancelRequest.current?.abort();
+    cancelRequest.current = null;
     if (!auth.requestHeaders) return () => {
       activeSubscription.current?.abort();
       activeSubscription.current = null;
+      cancelRequest.current?.abort();
+      cancelRequest.current = null;
     };
     const headers = auth.requestHeaders;
     const savedRunId = window.localStorage.getItem(storageKey);
     if (!savedRunId) return () => {
       activeSubscription.current?.abort();
       activeSubscription.current = null;
+      cancelRequest.current?.abort();
+      cancelRequest.current = null;
     };
     const runId: string = savedRunId;
     const controller = replaceActiveSubscription();
@@ -111,12 +118,16 @@ export function AgentRunPanel() {
     return () => {
       activeSubscription.current?.abort();
       activeSubscription.current = null;
+      cancelRequest.current?.abort();
+      cancelRequest.current = null;
     };
   }, [auth.requestHeaders]);
 
   async function createRun() {
     if (!question.trim() || !auth.requestHeaders) return;
     const headers = auth.requestHeaders;
+    cancelRequest.current?.abort();
+    cancelRequest.current = null;
     const controller = replaceActiveSubscription();
     try {
       const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs`, {
@@ -146,7 +157,9 @@ export function AgentRunPanel() {
   async function cancelRun() {
     if (!run || !auth.requestHeaders) return;
     const headers = auth.requestHeaders;
-    const controller = replaceActiveSubscription();
+    cancelRequest.current?.abort();
+    const controller = new AbortController();
+    cancelRequest.current = controller;
     try {
       const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${run.id}/cancel`, {
         method: "POST",
@@ -156,11 +169,13 @@ export function AgentRunPanel() {
       if (!response.ok) throw new Error("run_cancel_failed");
       const cancelledRun = await response.json() as AgentRun;
       if (controller.signal.aborted) return;
+      activeSubscription.current?.abort();
+      activeSubscription.current = null;
       setRun(cancelledRun);
     } catch {
       if (!controller.signal.aborted) setError("无法取消研究任务，请稍后重试。");
     } finally {
-      releaseSubscription(controller);
+      if (cancelRequest.current === controller) cancelRequest.current = null;
     }
   }
 
