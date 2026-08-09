@@ -2,14 +2,16 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const authRequestHeaders = vi.hoisted(() => ({
+  Authorization: "Bearer access-token",
+  "X-Workspace-ID": "workspace-a",
+}));
+
 vi.mock("../components/auth-provider", () => ({
   useAuth: () => ({
     status: "authenticated",
     mode: "oidc",
-    requestHeaders: {
-      Authorization: "Bearer access-token",
-      "X-Workspace-ID": "workspace-a",
-    },
+    requestHeaders: authRequestHeaders,
     error: null,
     signIn: vi.fn(),
     signOut: vi.fn(),
@@ -102,6 +104,43 @@ describe("agent run panel", () => {
     await user.click(screen.getByRole("button", { name: "启动研究" }));
 
     expect(await screen.findByText("研究已完成")).toBeInTheDocument();
+  });
+
+  it("reconnects after a running snapshot and resumes after the last event", async () => {
+    const runId = "00000000-0000-0000-0000-000000000006";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({
+        id: runId,
+        status: "queued",
+        executor_mode: "development_only",
+      }, 202))
+      .mockResolvedValueOnce(response(
+        "id: 1\nevent: text.delta\ndata: {\"text\":\"第一阶段\"}\n\nevent: heartbeat\ndata: {}\n\n",
+        200,
+        "text/event-stream",
+      ))
+      .mockResolvedValueOnce(response({ id: runId, status: "running", executor_mode: "development_only" }))
+      .mockResolvedValueOnce(response(
+        "id: 1\nevent: text.delta\ndata: {\"text\":\"第一阶段\"}\n\nid: 2\nevent: text.delta\ndata: {\"text\":\"研究已完成\"}\n\n",
+        200,
+        "text/event-stream",
+      ))
+      .mockResolvedValueOnce(response({ id: runId, status: "completed", executor_mode: "development_only" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<AgentRunPanel />);
+    await user.type(screen.getByLabelText("研究问题"), "持续追踪研究任务");
+    await user.click(screen.getByRole("button", { name: "启动研究" }));
+
+    expect(await screen.findByText("状态：completed", {}, { timeout: 2_000 })).toBeInTheDocument();
+    expect(screen.getAllByText("第一阶段")).toHaveLength(1);
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+      headers: expect.objectContaining({ "Last-Event-ID": "0" }),
+    });
+    expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({
+      headers: expect.objectContaining({ "Last-Event-ID": "1" }),
+    });
   });
 
   it("cancels a restored non-terminal run", async () => {

@@ -9,6 +9,8 @@ type AgentRun = { id: string; status: string; executor_mode: string };
 
 const storageKey = "investment-agent:last-run";
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
+const reconnectDelayMs = 1_000;
 async function readRun(runId: string, headers: HeadersInit): Promise<AgentRun> {
   const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${runId}`, { headers });
   if (!response.ok) throw new Error("run_not_found");
@@ -22,16 +24,34 @@ export function AgentRunPanel() {
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
 
-  async function subscribeToEvents(runId: string, headers: HeadersInit, isCancelled = () => false) {
-    const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${runId}/events`, {
-      headers: { ...headers, "Last-Event-ID": "0" },
-    });
-    if (!response.ok) throw new Error("events_unavailable");
-    for await (const event of readAgentEvents(response)) {
+  async function subscribeToEvents(runId: string, headers: HeadersInit, initialStatus: string, isCancelled = () => false) {
+    let lastEventId = 0;
+    let currentStatus = initialStatus;
+    while (!isCancelled()) {
+      const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${runId}/events`, {
+        headers: { ...headers, "Last-Event-ID": String(lastEventId) },
+      });
+      if (!response.ok) throw new Error("events_unavailable");
+      for await (const event of readAgentEvents(response)) {
+        if (isCancelled()) return;
+        if (event.id !== null) {
+          if (event.id <= lastEventId) continue;
+          lastEventId = event.id;
+        }
+        if (event.event !== "heartbeat") {
+          setEvents((existing) => event.id !== null && existing.some((saved) => saved.id === event.id)
+            ? existing
+            : [...existing, event]);
+        }
+      }
+      if (isCancelled() || terminalStatuses.has(currentStatus)) return;
+      const persistedRun = await readRun(runId, headers);
       if (isCancelled()) return;
-      if (event.id !== null || event.event !== "heartbeat") setEvents((existing) => [...existing, event]);
+      setRun(persistedRun);
+      currentStatus = persistedRun.status;
+      if (terminalStatuses.has(currentStatus)) return;
+      await new Promise((resolve) => window.setTimeout(resolve, reconnectDelayMs));
     }
-    if (!isCancelled()) setRun(await readRun(runId, headers));
   }
 
   useEffect(() => {
@@ -46,7 +66,7 @@ export function AgentRunPanel() {
         const persistedRun = await readRun(runId, headers);
         if (cancelled) return;
         setRun(persistedRun);
-        await subscribeToEvents(runId, headers, () => cancelled);
+        await subscribeToEvents(runId, headers, persistedRun.status, () => cancelled);
       } catch {
         if (!cancelled) setError("无法恢复该研究任务，请创建新的任务后重试。");
       }
@@ -70,7 +90,7 @@ export function AgentRunPanel() {
       setEvents([]);
       setError(null);
       setRun(created);
-      void subscribeToEvents(created.id, headers).catch(() => {
+      void subscribeToEvents(created.id, headers, created.status).catch(() => {
         setError("任务已创建，但无法接收实时进度。请刷新页面后重试。");
       });
     } catch {
