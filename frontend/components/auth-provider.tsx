@@ -64,7 +64,7 @@ export function AuthProvider({
   useEffect(() => {
     let cancelled = false;
     try {
-      const mode = readAuthMode(environment, process.env.NODE_ENV);
+      const mode = readAuthMode(environment);
       setMode(mode);
       if (mode === "development") {
         const headers = buildDevelopmentHeaders(
@@ -90,7 +90,7 @@ export function AuthProvider({
           setWorkspaceId(configuredWorkspaceId);
           setAccessToken(user?.access_token ?? null);
           setRequestHeaders(user?.access_token
-            ? buildAuthenticatedHeaders(user.access_token, configuredWorkspaceId) as Record<string, string>
+            ? buildAuthenticatedHeaders(user.access_token, configuredWorkspaceId)
             : null);
           setStatus(user?.access_token ? "authenticated" : "unauthenticated");
           if (window.location.pathname === "/oidc/callback") window.history.replaceState({}, "", "/agent-runs");

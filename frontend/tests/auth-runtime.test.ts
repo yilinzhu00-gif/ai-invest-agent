@@ -3,13 +3,14 @@ import { describe, expect, it } from "vitest";
 import { buildDevelopmentHeaders, readAuthMode } from "../lib/auth/runtime";
 
 describe("auth runtime", () => {
-  it("defaults next dev to development and production builds to oidc", () => {
-    expect(readAuthMode({}, "development")).toBe("development");
-    expect(readAuthMode({}, "production")).toBe("oidc");
+  it("requires an explicit non-blank auth mode", () => {
+    expect(() => readAuthMode({})).toThrow("Public auth mode configuration is incomplete");
+    expect(() => readAuthMode({ NEXT_PUBLIC_AUTH_MODE: "   " }))
+      .toThrow("Public auth mode configuration is incomplete");
   });
 
   it("rejects an unknown explicit auth mode", () => {
-    expect(() => readAuthMode({ NEXT_PUBLIC_AUTH_MODE: "unsafe" }, "development"))
+    expect(() => readAuthMode({ NEXT_PUBLIC_AUTH_MODE: "unsafe" }))
       .toThrow("Unsupported public auth mode");
   });
 

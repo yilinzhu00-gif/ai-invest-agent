@@ -1,4 +1,4 @@
-export function buildAuthenticatedHeaders(accessToken: string, workspaceId: string): HeadersInit {
+export function buildAuthenticatedHeaders(accessToken: string, workspaceId: string): Record<string, string> {
   return {
     Authorization: `Bearer ${accessToken}`,
     "X-Workspace-ID": workspaceId,

@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Only `NEXT_PUBLIC_AUTH_MODE=development` may produce development identity headers.
-- Unknown modes and missing/blank identity values fail closed as `configuration_error`.
+- Missing, blank, or unknown modes and missing/blank identity values fail closed as `configuration_error`.
 - Production backend authentication code in `backend/app/api/v1/agent_runs.py` must not change.
 - OIDC mode continues to send only `Authorization` and `X-Workspace-ID`.
 - Development mode sends only `X-Development-Principal-ID` and `X-Development-Workspace-ID`.
@@ -30,7 +30,7 @@
 
 **Interfaces:**
 - Consumes: existing `readPublicOidcConfig(environment)` and `UserManager` OIDC flow.
-- Produces: `AuthMode`, `readAuthMode(environment, nodeEnvironment)`, `buildDevelopmentHeaders(principalId, workspaceId)`, and `AuthContextValue.requestHeaders`.
+- Produces: `AuthMode`, `readAuthMode(environment)`, `buildDevelopmentHeaders(principalId, workspaceId)`, and `AuthContextValue.requestHeaders`.
 
 - [ ] **Step 1: Write failing auth-runtime tests**
 
@@ -42,13 +42,14 @@ import { describe, expect, it } from "vitest";
 import { buildDevelopmentHeaders, readAuthMode } from "../lib/auth/runtime";
 
 describe("auth runtime", () => {
-  it("defaults next dev to development and production builds to oidc", () => {
-    expect(readAuthMode({}, "development")).toBe("development");
-    expect(readAuthMode({}, "production")).toBe("oidc");
+  it("requires an explicit non-blank auth mode", () => {
+    expect(() => readAuthMode({})).toThrow("Public auth mode configuration is incomplete");
+    expect(() => readAuthMode({ NEXT_PUBLIC_AUTH_MODE: "   " }))
+      .toThrow("Public auth mode configuration is incomplete");
   });
 
   it("rejects an unknown explicit auth mode", () => {
-    expect(() => readAuthMode({ NEXT_PUBLIC_AUTH_MODE: "unsafe" }, "development"))
+    expect(() => readAuthMode({ NEXT_PUBLIC_AUTH_MODE: "unsafe" }))
       .toThrow("Unsupported public auth mode");
   });
 
@@ -79,10 +80,9 @@ type PublicEnvironment = Record<string, string | undefined>;
 
 export function readAuthMode(
   environment: PublicEnvironment,
-  nodeEnvironment: string | undefined,
 ): AuthMode {
   const configured = environment.NEXT_PUBLIC_AUTH_MODE?.trim();
-  if (!configured) return nodeEnvironment === "development" ? "development" : "oidc";
+  if (!configured) throw new Error("Public auth mode configuration is incomplete");
   if (configured !== "oidc" && configured !== "development") {
     throw new Error("Unsupported public auth mode");
   }
@@ -147,7 +147,7 @@ mode: AuthMode | null;
 requestHeaders: Record<string, string> | null;
 ```
 
-At the start of the existing effect, call `readAuthMode(environment, process.env.NODE_ENV)`. For `development`, call `buildDevelopmentHeaders(...)`, set workspace, mode, request headers, `authenticated`, and return without constructing `UserManager`. For `oidc`, keep the existing flow and set request headers with `buildAuthenticatedHeaders(user.access_token, configuredWorkspaceId)` only when a token exists. Configuration exceptions continue to set `configuration_error`.
+At the start of the existing effect, call `readAuthMode(environment)`. For `development`, call `buildDevelopmentHeaders(...)`, set workspace, mode, request headers, `authenticated`, and return without constructing `UserManager`. For `oidc`, keep the existing flow and set request headers with `buildAuthenticatedHeaders(user.access_token, configuredWorkspaceId)` only when a token exists. Configuration exceptions continue to set `configuration_error`.
 
 - [ ] **Step 8: Run Task 1 tests and typecheck**
 

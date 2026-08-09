@@ -13,7 +13,7 @@
 - `oidc`：保留现有 Authorization Code + PKCE 流程，研究请求发送 `Authorization: Bearer ...` 与 `X-Workspace-ID`。
 - `development`：不初始化 OIDC 客户端，使用 `NEXT_PUBLIC_DEVELOPMENT_PRINCIPAL_ID` 与 `NEXT_PUBLIC_DEFAULT_WORKSPACE_ID` 生成 `X-Development-Principal-ID` 和 `X-Development-Workspace-ID`。
 
-直接运行 `next dev` 时默认使用 `development`；生产构建默认使用 `oidc`。Docker 开发组合显式设置 `development`，避免依赖构建工具的隐式环境判断。生产示例显式设置 `oidc`。
+`NEXT_PUBLIC_AUTH_MODE` 必须显式设置为 `development` 或 `oidc`；缺失或空白值会产生 `configuration_error`。直接运行 `next dev` 与 Docker 开发组合都必须显式设置 `development`，避免依赖构建工具的隐式环境判断。生产示例显式设置 `oidc`。
 
 后端安全边界不变：`APP_ENV=production` 时继续拒绝开发身份请求头，只有经过 OIDC JWT 校验且具备 workspace membership 与 `agent:run` 权限的主体可以创建研究任务。
 
@@ -52,7 +52,7 @@ OIDC 模式的数据流保持：
 
 ## 错误处理
 
-- 未知 `NEXT_PUBLIC_AUTH_MODE`：`configuration_error`。
+- 缺失、空白或未知 `NEXT_PUBLIC_AUTH_MODE`：`configuration_error`。
 - 开发 principal 或 workspace 缺失/空白：`configuration_error`。
 - API 返回非成功状态：保留当前“无法创建/恢复/取消任务”提示。
 - SSE 失败：任务仍保留，页面提示刷新后恢复。
