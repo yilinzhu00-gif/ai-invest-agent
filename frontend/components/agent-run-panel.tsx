@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 
 import { useAuth } from "./auth-provider";
-import { buildAuthenticatedHeaders } from "../lib/auth/oidc";
 import { readAgentEvents, type AgentEvent } from "../lib/sse/agent-events";
 
 type AgentRun = { id: string; status: string; executor_mode: string };
@@ -36,8 +35,8 @@ export function AgentRunPanel() {
   }
 
   useEffect(() => {
-    if (!auth.accessToken || !auth.workspaceId) return;
-    const headers = buildAuthenticatedHeaders(auth.accessToken, auth.workspaceId);
+    if (!auth.requestHeaders) return;
+    const headers = auth.requestHeaders;
     const savedRunId = window.localStorage.getItem(storageKey);
     if (!savedRunId) return;
     const runId: string = savedRunId;
@@ -54,11 +53,11 @@ export function AgentRunPanel() {
     }
     void restore();
     return () => { cancelled = true; };
-  }, [auth.accessToken, auth.workspaceId]);
+  }, [auth.requestHeaders]);
 
   async function createRun() {
-    if (!question.trim() || !auth.accessToken || !auth.workspaceId) return;
-    const headers = buildAuthenticatedHeaders(auth.accessToken, auth.workspaceId);
+    if (!question.trim() || !auth.requestHeaders) return;
+    const headers = auth.requestHeaders;
     try {
       const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs`, {
         method: "POST",
@@ -80,8 +79,8 @@ export function AgentRunPanel() {
   }
 
   async function cancelRun() {
-    if (!run || !auth.accessToken || !auth.workspaceId) return;
-    const headers = buildAuthenticatedHeaders(auth.accessToken, auth.workspaceId);
+    if (!run || !auth.requestHeaders) return;
+    const headers = auth.requestHeaders;
     try {
       const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${run.id}/cancel`, {
         method: "POST",
@@ -98,9 +97,12 @@ export function AgentRunPanel() {
     <section className="agent-run-panel" aria-label="研究任务">
       <h2>研究任务</h2>
       <p>任务进度会通过 SSE 实时更新；生产环境由 Redis/Celery Worker 执行并持久化事件。</p>
+      {auth.mode === "development" && (
+        <p className="development-mode-notice">本地开发身份模式：任务不会调用真实行情或生产模型。</p>
+      )}
       {auth.status === "configuration_error" && <p className="error-card" role="alert">{auth.error}</p>}
-      {auth.status === "unauthenticated" && <button type="button" onClick={() => void auth.signIn()}>登录后启动研究</button>}
-      {auth.status === "authenticated" && <button type="button" onClick={() => void auth.signOut()}>退出登录</button>}
+      {auth.mode === "oidc" && auth.status === "unauthenticated" && <button type="button" onClick={() => void auth.signIn()}>登录后启动研究</button>}
+      {auth.mode === "oidc" && auth.status === "authenticated" && <button type="button" onClick={() => void auth.signOut()}>退出登录</button>}
       <label>
         研究问题
         <input value={question} onChange={(event) => setQuestion(event.target.value)} />

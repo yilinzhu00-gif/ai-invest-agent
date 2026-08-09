@@ -5,8 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("../components/auth-provider", () => ({
   useAuth: () => ({
     status: "authenticated",
-    accessToken: "access-token",
-    workspaceId: "workspace-a",
+    mode: "oidc",
+    requestHeaders: {
+      Authorization: "Bearer access-token",
+      "X-Workspace-ID": "workspace-a",
+    },
     error: null,
     signIn: vi.fn(),
     signOut: vi.fn(),

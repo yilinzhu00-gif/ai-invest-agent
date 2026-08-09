@@ -5,8 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("../components/auth-provider", () => ({
   useAuth: () => ({
     status: "authenticated",
-    accessToken: "access-token",
-    workspaceId: "workspace-a",
+    mode: "development",
+    requestHeaders: {
+      "X-Development-Principal-ID": "local-user",
+      "X-Development-Workspace-ID": "local-workspace",
+    },
     error: null,
     signIn: vi.fn(),
     signOut: vi.fn(),
@@ -26,7 +29,7 @@ afterEach(() => {
 });
 
 describe("agent run authentication", () => {
-  it("uses the OIDC access token and workspace instead of development headers", async () => {
+  it("uses development identity headers without OIDC headers", async () => {
     const fetchMock = vi.fn().mockResolvedValue(response({
       id: "00000000-0000-0000-0000-000000000005",
       status: "queued",
@@ -42,10 +45,11 @@ describe("agent run authentication", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       headers: expect.objectContaining({
-        Authorization: "Bearer access-token",
-        "X-Workspace-ID": "workspace-a",
+        "X-Development-Principal-ID": "local-user",
+        "X-Development-Workspace-ID": "local-workspace",
       }),
     });
-    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("X-Development-Principal-ID");
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("Authorization");
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("X-Workspace-ID");
   });
 });
