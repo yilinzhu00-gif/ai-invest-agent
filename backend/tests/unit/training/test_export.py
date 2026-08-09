@@ -1,3 +1,4 @@
+import hashlib
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -27,6 +28,8 @@ def _candidate(
         sample_id=f"sample-{index:04d}",
         task_type="evidence_review",
         source_run_id=UUID(int=index + 1),
+        source_document_id=f"document-{index:04d}",
+        source_content_sha256=hashlib.sha256(f"content-{index}".encode()).hexdigest(),
         workspace_id=UUID(int=10_000),
         classification=DataClassification.INTERNAL,
         input_text=input_text,
@@ -77,11 +80,35 @@ def test_export_is_no_go_when_license_or_authorization_is_missing() -> None:
 
 @pytest.mark.parametrize(
     "input_text",
-    ["联系手机号 13800138000", "Authorization: Bearer secret-token"],
+    [
+        "联系手机号 13800138000",
+        "Authorization: Bearer secret-token",
+        "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+        "SLACK_BOT_TOKEN=" + "xoxb-" + "redacted-fixture-1234567890",
+        "GOOGLE_API_KEY=AIzaSyDUMMYKEY1234567890abcdefghijklm",
+        "GITLAB_TOKEN=glpat-abcdefghijklmnopqrst",
+        "-----BEGIN PRIVATE KEY-----",
+        "password=correct-horse-battery-staple",
+    ],
 )
 def test_export_rejects_sensitive_text(input_text: str) -> None:
     report = prepare_training_export(
         [_candidate(1, input_text=input_text)],
+        holdout_groups=frozenset(),
+        policy=TrainingExportPolicy(minimum_train=1, minimum_holdout=0, maximum_holdout=1),
+    )
+
+    assert report.status is TrainingReadinessStatus.NO_GO
+    assert report.rejected == {"sample-0001": ["sensitive_text_detected"]}
+
+
+def test_export_scans_exported_text_metadata_for_secrets() -> None:
+    candidate = _candidate(1).model_copy(
+        update={"labels": ("approved", "glpat-abcdefghijklmnopqrst")}
+    )
+
+    report = prepare_training_export(
+        [candidate],
         holdout_groups=frozenset(),
         policy=TrainingExportPolicy(minimum_train=1, minimum_holdout=0, maximum_holdout=1),
     )
@@ -120,6 +147,56 @@ def test_duplicate_sample_ids_are_rejected() -> None:
             holdout_groups=frozenset(),
             policy=TrainingExportPolicy(minimum_train=1, minimum_holdout=0, maximum_holdout=1),
         )
+
+
+def test_duplicate_source_content_cannot_inflate_or_cross_splits() -> None:
+    train = _candidate(1, split_group="company-a")
+    holdout = _candidate(2, split_group="company-b").model_copy(
+        update={"source_content_sha256": train.source_content_sha256}
+    )
+
+    with pytest.raises(ValueError, match="source content must be unique"):
+        prepare_training_export(
+            [train, holdout],
+            holdout_groups=frozenset({"company-b"}),
+            policy=TrainingExportPolicy(minimum_train=1, minimum_holdout=1, maximum_holdout=2),
+        )
+
+
+def test_one_source_document_cannot_cross_split_groups() -> None:
+    train = _candidate(1, split_group="company-a")
+    holdout = _candidate(2, split_group="company-b").model_copy(
+        update={"source_document_id": train.source_document_id}
+    )
+
+    with pytest.raises(ValueError, match="source document cannot cross split groups"):
+        prepare_training_export(
+            [train, holdout],
+            holdout_groups=frozenset({"company-b"}),
+            policy=TrainingExportPolicy(minimum_train=1, minimum_holdout=1, maximum_holdout=2),
+        )
+
+
+def test_one_source_run_cannot_cross_split_groups() -> None:
+    train = _candidate(1, split_group="company-a")
+    holdout = _candidate(2, split_group="company-b").model_copy(
+        update={"source_run_id": train.source_run_id}
+    )
+
+    with pytest.raises(ValueError, match="source run cannot cross split groups"):
+        prepare_training_export(
+            [train, holdout],
+            holdout_groups=frozenset({"company-b"}),
+            policy=TrainingExportPolicy(minimum_train=1, minimum_holdout=1, maximum_holdout=2),
+        )
+
+
+def test_blank_license_or_approver_is_rejected() -> None:
+    for field in ("license_id", "approver_id"):
+        payload = _candidate(1).model_dump()
+        payload[field] = "   "
+        with pytest.raises(ValidationError):
+            TrainingCandidate.model_validate(payload)
 
 
 def test_default_gate_requires_300_train_and_50_to_100_holdout() -> None:

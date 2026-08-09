@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from backend.app.evidence.provenance import SHA256_PATTERN
 from backend.app.security.classification import DataClassification
 
 
@@ -31,6 +32,8 @@ class TrainingCandidate(BaseModel):
     sample_id: str = Field(min_length=1, max_length=128)
     task_type: str = Field(min_length=1, max_length=128)
     source_run_id: UUID
+    source_document_id: str = Field(min_length=1, max_length=256)
+    source_content_sha256: str = Field(pattern=SHA256_PATTERN)
     workspace_id: UUID
     classification: DataClassification
     input_text: str = Field(min_length=1, max_length=20_000)
@@ -51,6 +54,26 @@ class TrainingCandidate(BaseModel):
         if len(values) != len(set(values)) or any(not value.strip() for value in values):
             raise ValueError("tuple values must be unique and named")
         return values
+
+    @field_validator(
+        "sample_id", "task_type", "source_document_id", "license_id", "split_group"
+    )
+    @classmethod
+    def require_non_blank_identifiers(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("identifier must not be blank")
+        return normalized
+
+    @field_validator("approver_id")
+    @classmethod
+    def normalize_approver(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("approver must not be blank")
+        return normalized
 
     @model_validator(mode="after")
     def require_approval_metadata(self) -> Self:
@@ -81,12 +104,17 @@ class TrainingExample(BaseModel):
     sample_id: str
     task_type: str
     source_run_id: UUID
+    source_document_id: str
+    source_content_sha256: str
+    workspace_id: UUID
     classification: DataClassification
     input_text: str
     expected_output: str
     tool_names: tuple[str, ...]
     labels: tuple[str, ...]
     license_id: str
+    approver_id: str
+    approved_at: datetime
     split_group: str
     split: TrainingSplit
 

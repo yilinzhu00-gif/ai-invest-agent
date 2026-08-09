@@ -4,8 +4,11 @@ from collections.abc import Sequence
 from enum import StrEnum
 from math import ceil
 from pathlib import Path
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from backend.app.evidence.provenance import SHA256_PATTERN, EvidenceKind, EvidenceProvenance
 
 
 class AgentExperimentArm(StrEnum):
@@ -24,11 +27,24 @@ class ExperimentObservation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     case_id: str = Field(min_length=1, max_length=256)
+    case_sha256: str = Field(pattern=SHA256_PATTERN)
     arm: AgentExperimentArm
+    experiment_id: UUID
+    provenance: EvidenceProvenance
+    model_id: str = Field(min_length=1, max_length=128)
+    token_budget: int = Field(gt=0)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
     hard_gate_passed: bool
     latency_ms: int = Field(ge=0)
     cost_microusd: int = Field(ge=0)
     failure_type: str | None = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def require_usage_within_budget(self) -> "ExperimentObservation":
+        if self.input_tokens + self.output_tokens > self.token_budget:
+            raise ValueError("observed token usage exceeds registered budget")
+        return self
 
 
 class ExperimentPolicy(BaseModel):
@@ -57,6 +73,7 @@ class ExperimentDecision(BaseModel):
     matched_cases: int
     hard_gate_improvement_pp: float
     metrics: dict[AgentExperimentArm, ArmMetrics]
+    evidence_kind: EvidenceKind
     reasons: list[str]
 
 
@@ -92,6 +109,13 @@ def evaluate_controlled_experiment(
     }
     if any(not arm_observations for arm_observations in grouped.values()):
         raise ValueError("all three experiment arms are required")
+    experiment_ids = {observation.experiment_id for observation in observations}
+    if len(experiment_ids) != 1:
+        raise ValueError("observations must belong to one registered experiment")
+    evidence_kinds = {observation.provenance.kind for observation in observations}
+    if len(evidence_kinds) != 1:
+        raise ValueError("experiment arms must use one evidence kind")
+    evidence_kind = next(iter(evidence_kinds))
 
     case_sets: dict[AgentExperimentArm, set[str]] = {}
     for arm, arm_observations in grouped.items():
@@ -101,14 +125,49 @@ def evaluate_controlled_experiment(
         case_sets[arm] = set(case_ids)
     if len({frozenset(case_ids) for case_ids in case_sets.values()}) != 1:
         raise ValueError("experiment arms must use identical case sets")
+    case_digests = {
+        arm: {item.case_id: item.case_sha256 for item in arm_observations}
+        for arm, arm_observations in grouped.items()
+    }
+    if len({tuple(sorted(digests.items())) for digests in case_digests.values()}) != 1:
+        raise ValueError("experiment arms must use identical case inputs")
+
+    token_matched_by_case = {
+        item.case_id: item for item in grouped[AgentExperimentArm.TOKEN_MATCHED]
+    }
+    specialist_by_case = {item.case_id: item for item in grouped[AgentExperimentArm.SPECIALIST]}
+    if any(
+        (token_matched_by_case[case_id].model_id, token_matched_by_case[case_id].token_budget)
+        != (specialist_by_case[case_id].model_id, specialist_by_case[case_id].token_budget)
+        for case_id in case_sets[AgentExperimentArm.TOKEN_MATCHED]
+    ):
+        raise ValueError("token-matched and specialist arms require the same model and token budget")
 
     matched_cases = len(next(iter(case_sets.values())))
     metrics = {arm: _metrics(arm_observations) for arm, arm_observations in grouped.items()}
     specialist = metrics[AgentExperimentArm.SPECIALIST]
-    token_matched = metrics[AgentExperimentArm.TOKEN_MATCHED]
-    improvement_pp = round(
-        (specialist.hard_gate_pass_rate - token_matched.hard_gate_pass_rate) * 100, 2
+    specialist_passed = sum(
+        item.hard_gate_passed for item in grouped[AgentExperimentArm.SPECIALIST]
     )
+    token_matched_passed = sum(
+        item.hard_gate_passed for item in grouped[AgentExperimentArm.TOKEN_MATCHED]
+    )
+    exact_improvement_pp = (specialist_passed - token_matched_passed) * 100 / matched_cases
+    exact_specialist_average_cost = (
+        sum(item.cost_microusd for item in grouped[AgentExperimentArm.SPECIALIST])
+        / matched_cases
+    )
+    improvement_pp = round(exact_improvement_pp, 2)
+
+    if evidence_kind is not EvidenceKind.REAL_ATTESTED:
+        return ExperimentDecision(
+            status=ExperimentDecisionStatus.INSUFFICIENT_EVIDENCE,
+            matched_cases=matched_cases,
+            hard_gate_improvement_pp=improvement_pp,
+            metrics=metrics,
+            evidence_kind=evidence_kind,
+            reasons=["real_attested_evidence_required"],
+        )
 
     if matched_cases < policy.minimum_cases:
         return ExperimentDecision(
@@ -116,21 +175,23 @@ def evaluate_controlled_experiment(
             matched_cases=matched_cases,
             hard_gate_improvement_pp=improvement_pp,
             metrics=metrics,
+            evidence_kind=evidence_kind,
             reasons=["minimum_cases_not_met"],
         )
 
     reasons: list[str] = []
-    if improvement_pp < policy.minimum_improvement_pp:
+    if exact_improvement_pp < policy.minimum_improvement_pp:
         reasons.append("hard_gate_improvement_below_threshold")
     if specialist.p95_latency_ms > policy.max_p95_latency_ms:
         reasons.append("p95_latency_budget_exceeded")
-    if specialist.average_cost_microusd > policy.max_average_cost_microusd:
+    if exact_specialist_average_cost > policy.max_average_cost_microusd:
         reasons.append("average_cost_budget_exceeded")
     return ExperimentDecision(
         status=ExperimentDecisionStatus.NO_GO if reasons else ExperimentDecisionStatus.GO,
         matched_cases=matched_cases,
         hard_gate_improvement_pp=improvement_pp,
         metrics=metrics,
+        evidence_kind=evidence_kind,
         reasons=reasons,
     )
 

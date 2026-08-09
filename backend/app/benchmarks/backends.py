@@ -1,11 +1,14 @@
 import argparse
 from collections import Counter
 from collections.abc import Sequence
+from decimal import Decimal
 from enum import StrEnum
 from math import ceil
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from backend.app.evidence.provenance import SHA256_PATTERN, EvidenceKind, EvidenceProvenance
 
 
 class BackendModule(StrEnum):
@@ -40,11 +43,14 @@ class BenchmarkObservation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dataset_version: str = Field(min_length=1, max_length=128)
+    dataset_sha256: str = Field(pattern=SHA256_PATTERN)
     case_id: str = Field(min_length=1, max_length=256)
+    case_sha256: str = Field(pattern=SHA256_PATTERN)
     backend: BackendDescriptor
+    provenance: EvidenceProvenance
     success: bool
     quality_score: float = Field(ge=0, le=1)
-    latency_ms: int = Field(ge=0)
+    latency_ms: int = Field(gt=0)
     cost_microusd: int = Field(ge=0)
     failure_code: str | None = Field(default=None, max_length=128)
 
@@ -62,6 +68,7 @@ class BenchmarkSummary(BaseModel):
 
     backend: BackendDescriptor
     dataset_version: str
+    dataset_sha256: str
     cases: int
     evidence_sufficient: bool
     success_rate: float
@@ -71,6 +78,7 @@ class BenchmarkSummary(BaseModel):
     average_cost_microusd: float
     serial_throughput_per_second: float
     failure_codes: dict[str, int]
+    evidence_kinds: tuple[EvidenceKind, ...]
 
 
 class BackendComparisonPolicy(BaseModel):
@@ -107,18 +115,22 @@ def summarize_observations(
     dataset_versions = {observation.dataset_version for observation in observations}
     if len(dataset_versions) != 1:
         raise ValueError("summary requires one dataset version")
+    dataset_digests = {observation.dataset_sha256 for observation in observations}
+    if len(dataset_digests) != 1:
+        raise ValueError("summary requires one dataset digest")
     case_ids = [observation.case_id for observation in observations]
     if len(case_ids) != len(set(case_ids)):
         raise ValueError("benchmark case ids must be unique")
 
     total_latency_ms = sum(observation.latency_ms for observation in observations)
-    throughput = len(observations) * 1000 / total_latency_ms if total_latency_ms else 0.0
+    throughput = len(observations) * 1000 / total_latency_ms
     failures = Counter(
         observation.failure_code for observation in observations if observation.failure_code
     )
     return BenchmarkSummary(
         backend=next(iter(descriptors)),
         dataset_version=next(iter(dataset_versions)),
+        dataset_sha256=next(iter(dataset_digests)),
         cases=len(observations),
         evidence_sufficient=len(observations) >= minimum_cases,
         success_rate=round(sum(item.success for item in observations) / len(observations), 6),
@@ -132,6 +144,7 @@ def summarize_observations(
         ),
         serial_throughput_per_second=round(throughput, 2),
         failure_codes=dict(sorted(failures.items())),
+        evidence_kinds=tuple(sorted({item.provenance.kind for item in observations})),
     )
 
 
@@ -144,14 +157,37 @@ def compare_backends(
     candidate_summary = summarize_observations(candidate, minimum_cases=policy.minimum_cases)
     if control_summary.dataset_version != candidate_summary.dataset_version:
         raise ValueError("backends must use the same dataset version")
+    if control_summary.dataset_sha256 != candidate_summary.dataset_sha256:
+        raise ValueError("backends must use the same dataset digest")
     if control_summary.backend.module is not candidate_summary.backend.module:
         raise ValueError("backends must implement the same module")
     if {item.case_id for item in control} != {item.case_id for item in candidate}:
         raise ValueError("backends must use identical case sets")
+    control_case_digests = {item.case_id: item.case_sha256 for item in control}
+    candidate_case_digests = {item.case_id: item.case_sha256 for item in candidate}
+    if control_case_digests != candidate_case_digests:
+        raise ValueError("backends must use identical case inputs")
 
-    quality_delta = round(
-        candidate_summary.average_quality - control_summary.average_quality, 6
-    )
+    exact_control_quality = sum(
+        (Decimal(str(item.quality_score)) for item in control), start=Decimal(0)
+    ) / Decimal(len(control))
+    exact_candidate_quality = sum(
+        (Decimal(str(item.quality_score)) for item in candidate), start=Decimal(0)
+    ) / Decimal(len(candidate))
+    exact_quality_delta = exact_candidate_quality - exact_control_quality
+    quality_delta = round(float(exact_quality_delta), 6)
+    evidence_kinds = {
+        *(item.provenance.kind for item in control),
+        *(item.provenance.kind for item in candidate),
+    }
+    if evidence_kinds != {EvidenceKind.REAL_ATTESTED}:
+        return BackendComparison(
+            status=BackendEvidenceStatus.INSUFFICIENT_EVIDENCE,
+            control=control_summary,
+            candidate=candidate_summary,
+            quality_delta=quality_delta,
+            reasons=["real_attested_evidence_required"],
+        )
     if not control_summary.evidence_sufficient or not candidate_summary.evidence_sufficient:
         return BackendComparison(
             status=BackendEvidenceStatus.INSUFFICIENT_EVIDENCE,
@@ -162,9 +198,9 @@ def compare_backends(
         )
 
     reasons: list[str] = []
-    if candidate_summary.average_quality < policy.minimum_candidate_quality:
+    if exact_candidate_quality < Decimal(str(policy.minimum_candidate_quality)):
         reasons.append("candidate_below_quality_floor")
-    if -quality_delta > policy.maximum_quality_drop:
+    if -exact_quality_delta > Decimal(str(policy.maximum_quality_drop)):
         reasons.append("quality_drop_exceeded")
     return BackendComparison(
         status=BackendEvidenceStatus.NO_GO if reasons else BackendEvidenceStatus.EVIDENCE_READY,

@@ -2,7 +2,6 @@ import hashlib
 import json
 from collections.abc import Sequence
 
-from backend.app.security.pii import redact_sensitive_text
 from backend.app.training.schemas import (
     CandidateStatus,
     TrainingCandidate,
@@ -12,6 +11,7 @@ from backend.app.training.schemas import (
     TrainingReadinessStatus,
     TrainingSplit,
 )
+from backend.app.training.sensitive import contains_sensitive_text
 
 
 def _candidate_rejection_reasons(candidate: TrainingCandidate) -> list[str]:
@@ -22,10 +22,19 @@ def _candidate_rejection_reasons(candidate: TrainingCandidate) -> list[str]:
         reasons.append("license_not_approved")
     if not candidate.training_authorized:
         reasons.append("training_not_authorized")
-    if any(
-        redact_sensitive_text(value) != value
-        for value in (candidate.input_text, candidate.expected_output)
-    ):
+    exported_text = (
+        candidate.sample_id,
+        candidate.task_type,
+        candidate.source_document_id,
+        candidate.input_text,
+        candidate.expected_output,
+        *candidate.tool_names,
+        *candidate.labels,
+        candidate.license_id,
+        candidate.approver_id or "",
+        candidate.split_group,
+    )
+    if any(contains_sensitive_text(value) for value in exported_text):
         reasons.append("sensitive_text_detected")
     return reasons
 
@@ -50,7 +59,19 @@ def prepare_training_export(
     sample_ids = [candidate.sample_id for candidate in candidates]
     if len(sample_ids) != len(set(sample_ids)):
         raise ValueError("training sample ids must be unique")
-
+    content_hashes = [candidate.source_content_sha256 for candidate in candidates]
+    if len(content_hashes) != len(set(content_hashes)):
+        raise ValueError("training source content must be unique")
+    document_groups: dict[str, set[str]] = {}
+    for candidate in candidates:
+        document_groups.setdefault(candidate.source_document_id, set()).add(candidate.split_group)
+    if any(len(groups) != 1 for groups in document_groups.values()):
+        raise ValueError("one source document cannot cross split groups")
+    run_groups: dict[str, set[str]] = {}
+    for candidate in candidates:
+        run_groups.setdefault(str(candidate.source_run_id), set()).add(candidate.split_group)
+    if any(len(groups) != 1 for groups in run_groups.values()):
+        raise ValueError("one source run cannot cross split groups")
     rejected = {
         candidate.sample_id: reasons
         for candidate in sorted(candidates, key=lambda item: item.sample_id)
@@ -67,36 +88,44 @@ def prepare_training_export(
             reasons=["candidate_governance_gate_failed"],
         )
 
-    examples = [
-        TrainingExample(
-            sample_id=candidate.sample_id,
-            task_type=candidate.task_type,
-            source_run_id=candidate.source_run_id,
-            classification=candidate.classification,
-            input_text=candidate.input_text,
-            expected_output=candidate.expected_output,
-            tool_names=candidate.tool_names,
-            labels=candidate.labels,
-            license_id=candidate.license_id,
-            split_group=candidate.split_group,
-            split=(
-                TrainingSplit.HOLDOUT
-                if candidate.split_group in holdout_groups
-                else TrainingSplit.TRAIN
-            ),
+    examples: list[TrainingExample] = []
+    for candidate in sorted(candidates, key=lambda item: item.sample_id):
+        if candidate.approver_id is None or candidate.approved_at is None:
+            raise AssertionError("approved candidates must retain approval metadata")
+        examples.append(
+            TrainingExample(
+                sample_id=candidate.sample_id,
+                task_type=candidate.task_type,
+                source_run_id=candidate.source_run_id,
+                source_document_id=candidate.source_document_id,
+                source_content_sha256=candidate.source_content_sha256,
+                workspace_id=candidate.workspace_id,
+                classification=candidate.classification,
+                input_text=candidate.input_text,
+                expected_output=candidate.expected_output,
+                tool_names=candidate.tool_names,
+                labels=candidate.labels,
+                license_id=candidate.license_id,
+                approver_id=candidate.approver_id,
+                approved_at=candidate.approved_at,
+                split_group=candidate.split_group,
+                split=(
+                    TrainingSplit.HOLDOUT
+                    if candidate.split_group in holdout_groups
+                    else TrainingSplit.TRAIN
+                ),
+            )
         )
-        for candidate in sorted(candidates, key=lambda item: item.sample_id)
-    ]
     train_count = sum(example.split is TrainingSplit.TRAIN for example in examples)
     holdout_count = sum(example.split is TrainingSplit.HOLDOUT for example in examples)
-    reasons: list[str] = []
+    readiness_reasons: list[str] = []
     if train_count < policy.minimum_train:
-        reasons.append("minimum_train_not_met")
+        readiness_reasons.append("minimum_train_not_met")
     if holdout_count < policy.minimum_holdout:
-        reasons.append("minimum_holdout_not_met")
+        readiness_reasons.append("minimum_holdout_not_met")
     if holdout_count > policy.maximum_holdout:
-        reasons.append("maximum_holdout_exceeded")
-    if reasons:
+        readiness_reasons.append("maximum_holdout_exceeded")
+    if readiness_reasons:
         return TrainingExportReport(
             status=TrainingReadinessStatus.INSUFFICIENT_EVIDENCE,
             train_count=train_count,
@@ -104,7 +133,7 @@ def prepare_training_export(
             rejected={},
             dataset_hash=None,
             examples=[],
-            reasons=reasons,
+            reasons=readiness_reasons,
         )
     return TrainingExportReport(
         status=TrainingReadinessStatus.EVIDENCE_READY,
