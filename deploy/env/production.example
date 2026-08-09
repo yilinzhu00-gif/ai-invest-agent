@@ -6,3 +6,4 @@ POSTGRES_PASSWORD=replace-with-a-unique-secret-from-your-secret-manager
 DATABASE_URL=postgresql://replace-with-database-user:replace-with-a-unique-secret-from-your-secret-manager@postgres:5432/replace-with-database-name
 CORS_ORIGINS=https://app.example.invalid
 NEXT_PUBLIC_API_BASE_URL=https://api.example.invalid
+NEXT_PUBLIC_AUTH_MODE=oidc

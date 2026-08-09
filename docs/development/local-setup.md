@@ -75,6 +75,24 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 npm --prefix frontend run dev
 `http://localhost:3000`，请勿混用 `127.0.0.1` 作为前端地址。该页面只调用评分 API，
 不在浏览器中复制评分算法。
 
+### Next.js 研究任务页面（development 身份）
+
+本地研究任务开发必须显式启用 development 身份模式；缺失或空白的
+`NEXT_PUBLIC_AUTH_MODE` 会安全地按 OIDC 模式处理。先启动 API，再在另一个终端运行：
+
+```bash
+NEXT_PUBLIC_AUTH_MODE=development \
+NEXT_PUBLIC_DEVELOPMENT_PRINCIPAL_ID=local-user \
+NEXT_PUBLIC_DEFAULT_WORKSPACE_ID=local-workspace \
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 \
+npm --prefix frontend run dev
+```
+
+标准前端来源是 `http://localhost:3000`。如使用端口 `3001`，API 必须以
+`CORS_ORIGINS=http://localhost:3000,http://localhost:3001` 启动；不要通过禁用 CORS
+绕过该限制。打开 `http://localhost:3000/agent-runs`，development 模式的输出是确定性的
+本地基线，不是真实市场研究。
+
 ### Streamlit 兼容路径
 
 Streamlit 是仍受支持的旧界面。只有使用行情、LLM 或 RAG 功能时才需把 `.env.example` 复制为本地 `.env` 并填入自己的模型提供方配置；不要提交 `.env`：

@@ -7,3 +7,6 @@ POSTGRES_PASSWORD=change-me-development-only
 DATABASE_URL=postgresql://investment_agent:change-me-development-only@postgres:5432/investment_agent
 CORS_ORIGINS=http://localhost:3000
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+NEXT_PUBLIC_AUTH_MODE=development
+NEXT_PUBLIC_DEVELOPMENT_PRINCIPAL_ID=local-user
+NEXT_PUBLIC_DEFAULT_WORKSPACE_ID=local-workspace
