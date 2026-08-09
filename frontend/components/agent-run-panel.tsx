@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAuth } from "./auth-provider";
 import { readAgentEvents, type AgentEvent } from "../lib/sse/agent-events";
@@ -11,10 +11,25 @@ const storageKey = "investment-agent:last-run";
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
 const reconnectDelayMs = 1_000;
-async function readRun(runId: string, headers: HeadersInit): Promise<AgentRun> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${runId}`, { headers });
+async function readRun(runId: string, headers: HeadersInit, signal: AbortSignal): Promise<AgentRun> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${runId}`, { headers, signal });
   if (!response.ok) throw new Error("run_not_found");
   return response.json() as Promise<AgentRun>;
+}
+
+function waitForReconnect(signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const timeoutId = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, reconnectDelayMs);
+    function onAbort() {
+      window.clearTimeout(timeoutId);
+      resolve(false);
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export function AgentRunPanel() {
@@ -23,17 +38,30 @@ export function AgentRunPanel() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
+  const activeSubscription = useRef<AbortController | null>(null);
 
-  async function subscribeToEvents(runId: string, headers: HeadersInit, initialStatus: string, isCancelled = () => false) {
+  function replaceActiveSubscription() {
+    activeSubscription.current?.abort();
+    const controller = new AbortController();
+    activeSubscription.current = controller;
+    return controller;
+  }
+
+  function releaseSubscription(controller: AbortController) {
+    if (activeSubscription.current === controller) activeSubscription.current = null;
+  }
+
+  async function subscribeToEvents(runId: string, headers: HeadersInit, initialStatus: string, signal: AbortSignal) {
     let lastEventId = 0;
     let currentStatus = initialStatus;
-    while (!isCancelled()) {
+    while (!signal.aborted) {
       const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${runId}/events`, {
         headers: { ...headers, "Last-Event-ID": String(lastEventId) },
+        signal,
       });
       if (!response.ok) throw new Error("events_unavailable");
       for await (const event of readAgentEvents(response)) {
-        if (isCancelled()) return;
+        if (signal.aborted) return;
         if (event.id !== null) {
           if (event.id <= lastEventId) continue;
           lastEventId = event.id;
@@ -44,57 +72,74 @@ export function AgentRunPanel() {
             : [...existing, event]);
         }
       }
-      if (isCancelled() || terminalStatuses.has(currentStatus)) return;
-      const persistedRun = await readRun(runId, headers);
-      if (isCancelled()) return;
+      if (signal.aborted || terminalStatuses.has(currentStatus)) return;
+      const persistedRun = await readRun(runId, headers, signal);
+      if (signal.aborted) return;
       setRun(persistedRun);
       currentStatus = persistedRun.status;
       if (terminalStatuses.has(currentStatus)) return;
-      await new Promise((resolve) => window.setTimeout(resolve, reconnectDelayMs));
+      if (!await waitForReconnect(signal)) return;
     }
   }
 
   useEffect(() => {
-    if (!auth.requestHeaders) return;
+    if (!auth.requestHeaders) return () => {
+      activeSubscription.current?.abort();
+      activeSubscription.current = null;
+    };
     const headers = auth.requestHeaders;
     const savedRunId = window.localStorage.getItem(storageKey);
-    if (!savedRunId) return;
+    if (!savedRunId) return () => {
+      activeSubscription.current?.abort();
+      activeSubscription.current = null;
+    };
     const runId: string = savedRunId;
-    let cancelled = false;
+    const controller = replaceActiveSubscription();
     async function restore() {
       try {
-        const persistedRun = await readRun(runId, headers);
-        if (cancelled) return;
+        const persistedRun = await readRun(runId, headers, controller.signal);
+        if (controller.signal.aborted) return;
         setRun(persistedRun);
-        await subscribeToEvents(runId, headers, persistedRun.status, () => cancelled);
+        await subscribeToEvents(runId, headers, persistedRun.status, controller.signal);
       } catch {
-        if (!cancelled) setError("无法恢复该研究任务，请创建新的任务后重试。");
+        if (!controller.signal.aborted) setError("无法恢复该研究任务，请创建新的任务后重试。");
+      } finally {
+        releaseSubscription(controller);
       }
     }
     void restore();
-    return () => { cancelled = true; };
+    return () => {
+      activeSubscription.current?.abort();
+      activeSubscription.current = null;
+    };
   }, [auth.requestHeaders]);
 
   async function createRun() {
     if (!question.trim() || !auth.requestHeaders) return;
     const headers = auth.requestHeaders;
+    const controller = replaceActiveSubscription();
     try {
       const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs`, {
         method: "POST",
         headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({ question: question.trim() }),
+        signal: controller.signal,
       });
       if (!response.ok) throw new Error("run_create_failed");
       const created = await response.json() as AgentRun;
+      if (controller.signal.aborted) return;
       window.localStorage.setItem(storageKey, created.id);
       setEvents([]);
       setError(null);
       setRun(created);
-      void subscribeToEvents(created.id, headers, created.status).catch(() => {
-        setError("任务已创建，但无法接收实时进度。请刷新页面后重试。");
-      });
+      void subscribeToEvents(created.id, headers, created.status, controller.signal)
+        .catch(() => {
+          if (!controller.signal.aborted) setError("任务已创建，但无法接收实时进度。请刷新页面后重试。");
+        })
+        .finally(() => releaseSubscription(controller));
     } catch {
-      setError("无法创建研究任务，请稍后重试。");
+      releaseSubscription(controller);
+      if (!controller.signal.aborted) setError("无法创建研究任务，请稍后重试。");
     }
   }
 

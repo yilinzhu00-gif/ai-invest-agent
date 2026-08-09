@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -141,6 +141,46 @@ describe("agent run panel", () => {
     expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({
       headers: expect.objectContaining({ "Last-Event-ID": "1" }),
     });
+  });
+
+  it("stops the previous create subscription when a new run starts", async () => {
+    const firstRunId = "00000000-0000-0000-0000-000000000007";
+    const secondRunId = "00000000-0000-0000-0000-000000000008";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ id: firstRunId, status: "queued", executor_mode: "development_only" }, 202))
+      .mockResolvedValueOnce(response("event: heartbeat\ndata: {}\n\n", 200, "text/event-stream"))
+      .mockResolvedValueOnce(response({ id: firstRunId, status: "running", executor_mode: "development_only" }))
+      .mockResolvedValueOnce(response({ id: secondRunId, status: "queued", executor_mode: "development_only" }, 202))
+      .mockResolvedValueOnce(response(
+        "id: 1\nevent: text.delta\ndata: {\"text\":\"新任务已完成\"}\n\n",
+        200,
+        "text/event-stream",
+      ))
+      .mockResolvedValueOnce(response({ id: secondRunId, status: "completed", executor_mode: "development_only" }))
+      .mockResolvedValueOnce(response(
+        "id: 2\nevent: text.delta\ndata: {\"text\":\"旧任务迟到事件\"}\n\n",
+        200,
+        "text/event-stream",
+      ))
+      .mockResolvedValueOnce(response({ id: firstRunId, status: "completed", executor_mode: "development_only" }));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<AgentRunPanel />);
+    await user.type(screen.getByLabelText("研究问题"), "第一个任务");
+    await user.click(screen.getByRole("button", { name: "启动研究" }));
+    expect(await screen.findByText("状态：running")).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("研究问题"));
+    await user.type(screen.getByLabelText("研究问题"), "第二个任务");
+    await user.click(screen.getByRole("button", { name: "启动研究" }));
+
+    expect(await screen.findByText("新任务已完成")).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 1_100));
+    });
+    expect(screen.queryByText("旧任务迟到事件")).not.toBeInTheDocument();
+    expect(localStorage.getItem("investment-agent:last-run")).toBe(secondRunId);
   });
 
   it("cancels a restored non-terminal run", async () => {
