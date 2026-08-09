@@ -3,21 +3,26 @@
 import { InMemoryWebStorage, UserManager, WebStorageStateStore } from "oidc-client-ts";
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { readPublicOidcConfig, type PublicOidcConfig } from "../lib/auth/oidc";
+import { buildAuthenticatedHeaders, readPublicOidcConfig, type PublicOidcConfig } from "../lib/auth/oidc";
+import { buildDevelopmentHeaders, readAuthMode, type AuthMode } from "../lib/auth/runtime";
 
 type PublicEnvironment = Record<string, string | undefined>;
 type AuthStatus = "loading" | "authenticated" | "unauthenticated" | "configuration_error";
 
-type AuthContextValue = {
+export type AuthContextValue = {
   status: AuthStatus;
+  mode: AuthMode | null;
   accessToken: string | null;
   workspaceId: string | null;
+  requestHeaders: Record<string, string> | null;
   error: string | null;
   signIn: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
 const defaultEnvironment: PublicEnvironment = {
+  NEXT_PUBLIC_AUTH_MODE: process.env.NEXT_PUBLIC_AUTH_MODE,
+  NEXT_PUBLIC_DEVELOPMENT_PRINCIPAL_ID: process.env.NEXT_PUBLIC_DEVELOPMENT_PRINCIPAL_ID,
   NEXT_PUBLIC_OIDC_AUTHORITY: process.env.NEXT_PUBLIC_OIDC_AUTHORITY,
   NEXT_PUBLIC_OIDC_CLIENT_ID: process.env.NEXT_PUBLIC_OIDC_CLIENT_ID,
   NEXT_PUBLIC_OIDC_SCOPE: process.env.NEXT_PUBLIC_OIDC_SCOPE,
@@ -50,13 +55,27 @@ export function AuthProvider({
 }) {
   const managerRef = useRef<UserManager | null>(null);
   const [status, setStatus] = useState<AuthStatus>("loading");
+  const [mode, setMode] = useState<AuthMode | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [requestHeaders, setRequestHeaders] = useState<Record<string, string> | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     try {
+      const mode = readAuthMode(environment, process.env.NODE_ENV);
+      setMode(mode);
+      if (mode === "development") {
+        const headers = buildDevelopmentHeaders(
+          environment.NEXT_PUBLIC_DEVELOPMENT_PRINCIPAL_ID,
+          environment.NEXT_PUBLIC_DEFAULT_WORKSPACE_ID,
+        );
+        setWorkspaceId(headers["X-Development-Workspace-ID"]);
+        setRequestHeaders(headers);
+        setStatus("authenticated");
+        return () => { cancelled = true; };
+      }
       const config = readPublicOidcConfig(environment);
       const configuredWorkspaceId = environment.NEXT_PUBLIC_DEFAULT_WORKSPACE_ID;
       if (!configuredWorkspaceId) throw new Error("OIDC workspace configuration is incomplete");
@@ -70,6 +89,9 @@ export function AuthProvider({
           if (cancelled) return;
           setWorkspaceId(configuredWorkspaceId);
           setAccessToken(user?.access_token ?? null);
+          setRequestHeaders(user?.access_token
+            ? buildAuthenticatedHeaders(user.access_token, configuredWorkspaceId) as Record<string, string>
+            : null);
           setStatus(user?.access_token ? "authenticated" : "unauthenticated");
           if (window.location.pathname === "/oidc/callback") window.history.replaceState({}, "", "/agent-runs");
         } catch {
@@ -91,8 +113,10 @@ export function AuthProvider({
 
   const value: AuthContextValue = {
     status,
+    mode,
     accessToken,
     workspaceId,
+    requestHeaders,
     error,
     signIn: async () => { await managerRef.current?.signinRedirect(); },
     signOut: async () => { await managerRef.current?.signoutRedirect(); },
