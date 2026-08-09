@@ -35,3 +35,4 @@ reports/
 # Operator-managed deployment secrets and TLS material
 deploy/certs/
 deploy/env/*.env
+.worktrees/
