@@ -146,15 +146,21 @@ export function AgentRunPanel() {
   async function cancelRun() {
     if (!run || !auth.requestHeaders) return;
     const headers = auth.requestHeaders;
+    const controller = replaceActiveSubscription();
     try {
       const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${run.id}/cancel`, {
         method: "POST",
         headers,
+        signal: controller.signal,
       });
       if (!response.ok) throw new Error("run_cancel_failed");
-      setRun(await response.json() as AgentRun);
+      const cancelledRun = await response.json() as AgentRun;
+      if (controller.signal.aborted) return;
+      setRun(cancelledRun);
     } catch {
-      setError("无法取消研究任务，请稍后重试。");
+      if (!controller.signal.aborted) setError("无法取消研究任务，请稍后重试。");
+    } finally {
+      releaseSubscription(controller);
     }
   }
 

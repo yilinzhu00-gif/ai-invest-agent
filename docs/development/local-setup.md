@@ -78,7 +78,7 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 npm --prefix frontend run dev
 ### Next.js 研究任务页面（development 身份）
 
 本地研究任务开发必须显式启用 development 身份模式；缺失或空白的
-`NEXT_PUBLIC_AUTH_MODE` 会安全地按 OIDC 模式处理。先启动 API，再在另一个终端运行：
+`NEXT_PUBLIC_AUTH_MODE` 会进入 `configuration_error`，不会推断身份模式。先启动 API，再在另一个终端运行：
 
 ```bash
 NEXT_PUBLIC_AUTH_MODE=development \

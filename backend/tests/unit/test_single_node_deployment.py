@@ -50,3 +50,14 @@ def test_frontend_image_receives_public_oidc_build_arguments() -> None:
     ):
         assert f"ARG {variable}" in dockerfile
         assert variable in compose
+
+
+def test_frontend_auth_mode_must_be_explicit_across_deployment_inputs() -> None:
+    dockerfile_lines = (ROOT / "frontend" / "Dockerfile").read_text().splitlines()
+    compose = (ROOT / "deploy" / "compose.base.yml").read_text()
+    single_node_environment = (ROOT / "deploy" / "env" / "single-node.example").read_text()
+
+    assert "ARG NEXT_PUBLIC_AUTH_MODE" in dockerfile_lines
+    assert not any(line.startswith("ARG NEXT_PUBLIC_AUTH_MODE=") for line in dockerfile_lines)
+    assert "NEXT_PUBLIC_AUTH_MODE: ${NEXT_PUBLIC_AUTH_MODE:?NEXT_PUBLIC_AUTH_MODE must be set}" in compose
+    assert "NEXT_PUBLIC_AUTH_MODE=oidc" in single_node_environment.splitlines()

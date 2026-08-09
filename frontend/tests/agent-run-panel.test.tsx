@@ -183,6 +183,45 @@ describe("agent run panel", () => {
     expect(localStorage.getItem("investment-agent:last-run")).toBe(secondRunId);
   });
 
+  it("ignores a stale cancel response after a new run starts", async () => {
+    const firstRunId = "00000000-0000-0000-0000-000000000009";
+    const secondRunId = "00000000-0000-0000-0000-000000000010";
+    let resolveCancel!: (value: Response) => void;
+    const delayedCancel = new Promise<Response>((resolve) => {
+      resolveCancel = resolve;
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ id: firstRunId, status: "running", executor_mode: "development_only" }))
+      .mockResolvedValueOnce(response("event: heartbeat\ndata: {}\n\n", 200, "text/event-stream"))
+      .mockResolvedValueOnce(response({ id: firstRunId, status: "running", executor_mode: "development_only" }))
+      .mockReturnValueOnce(delayedCancel)
+      .mockResolvedValueOnce(response({ id: secondRunId, status: "queued", executor_mode: "development_only" }, 202))
+      .mockResolvedValueOnce(response(
+        "id: 1\nevent: text.delta\ndata: {\"text\":\"新任务结果\"}\n\n",
+        200,
+        "text/event-stream",
+      ))
+      .mockResolvedValueOnce(response({ id: secondRunId, status: "completed", executor_mode: "development_only" }));
+    vi.stubGlobal("fetch", fetchMock);
+    localStorage.setItem("investment-agent:last-run", firstRunId);
+    const user = userEvent.setup();
+
+    render(<AgentRunPanel />);
+    await user.click(await screen.findByRole("button", { name: "取消任务" }));
+    await user.type(screen.getByLabelText("研究问题"), "新任务");
+    await user.click(screen.getByRole("button", { name: "启动研究" }));
+    expect(await screen.findByText("状态：completed")).toBeInTheDocument();
+
+    await act(async () => {
+      resolveCancel(response({ id: firstRunId, status: "cancelled", executor_mode: "development_only" }));
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+
+    expect(screen.getByText("状态：completed")).toBeInTheDocument();
+    expect(screen.queryByText("状态：cancelled")).not.toBeInTheDocument();
+    expect(localStorage.getItem("investment-agent:last-run")).toBe(secondRunId);
+  });
+
   it("cancels a restored non-terminal run", async () => {
     localStorage.setItem("investment-agent:last-run", "00000000-0000-0000-0000-000000000003");
     vi.stubGlobal(

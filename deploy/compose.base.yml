@@ -84,7 +84,7 @@ services:
       dockerfile: frontend/Dockerfile
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
-        NEXT_PUBLIC_AUTH_MODE: ${NEXT_PUBLIC_AUTH_MODE:-oidc}
+        NEXT_PUBLIC_AUTH_MODE: ${NEXT_PUBLIC_AUTH_MODE:?NEXT_PUBLIC_AUTH_MODE must be set}
         NEXT_PUBLIC_OIDC_AUTHORITY: ${NEXT_PUBLIC_OIDC_AUTHORITY:-}
         NEXT_PUBLIC_OIDC_CLIENT_ID: ${NEXT_PUBLIC_OIDC_CLIENT_ID:-}
         NEXT_PUBLIC_OIDC_SCOPE: ${NEXT_PUBLIC_OIDC_SCOPE:-openid profile email agent:run}

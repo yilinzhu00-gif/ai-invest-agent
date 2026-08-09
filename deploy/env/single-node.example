@@ -13,6 +13,7 @@ SERVER_NAME=aiinvestmentagent.cn
 WWW_SERVER_NAME=www.aiinvestmentagent.cn
 CORS_ORIGINS=https://aiinvestmentagent.cn,https://www.aiinvestmentagent.cn
 NEXT_PUBLIC_API_BASE_URL=
+NEXT_PUBLIC_AUTH_MODE=oidc
 TLS_CERT_FILE=/opt/investment-agent/certs/aiinvestmentagent.cn.pem
 TLS_KEY_FILE=/opt/investment-agent/certs/aiinvestmentagent.cn.key
 
