@@ -31,7 +31,22 @@ Next.js /scoring ──POST /api/v1/scoring/evaluate──> FastAPI ──> scor
 - **Agent Run（阶段二开发边界）**：`agent_runs`、`agent_run_events` 和 `conversation_messages`
   保存 Run、顺序事件与用户消息；`/api/v1/agent/runs` 使用 SSE 重放已落库事件。当前
   `DevelopmentRunExecutor` 是显式 `development_only` 的进程内执行器，不能替代阶段三的队列或
-  跨进程恢复机制；临时 header principal 仅用于本地 workspace 隔离测试。
+  跨进程恢复机制；临时 header principal 仅用于本地 workspace 隔离测试。每次 Run 都会实际执行
+  `Analyst → Validator → Reviewer`：Analyst 与 Reviewer 不可委派，Validator 是不可绕过的
+  引用、数值和权限硬门；每个角色的开始/结束/修订上限都会以 `agent.*` 事件持久化。
+- **公开行情快照（开发期）**：当 Run 提供 6 位 A 股代码时，执行器用 AkShare 读取最近最多
+  6 个未复权日线数据，并将标的、日期、收盘、涨跌幅、日内区间与成交数据固化为唯一 Citation。
+  `research.result` 事件只展示该观测快照及来源；它明确不预测未来走势，数据源不可用会使任务失败，
+  不会用问题文本伪造行情结果。
+- **确认式 Memory 与恢复**：`agent_memories` 不是自动“长期记忆”。仅当 Reviewer 到达
+  `human_review`，任务才进入 `awaiting_confirmation`；人工批准后，最终摘要才按用户与工作区隔离
+  写入 Memory，且其只能作为上下文、不能充当引用证据。Worker 将超时作为显式可重试故障并持久化
+  重试事件，达到上限或其他失败后保留原问题和事件历史，等待人工调用恢复接口重新入队。
+- **多 Agent 模型模式**：默认 `AGENT_EXECUTION_MODE=deterministic`，以证据原文生成保守草稿，
+  适合离线开发；显式设为 `openai_compatible` 后，Analyst 和 Reviewer 分别使用 `CHAT_MODEL` 与
+  `REVIEW_MODEL` 的 OpenAI-compatible 调用，并共享单 Run token/费用上限。该模式需要
+  `MODEL_API_KEY`（也兼容已有的 `OPENAI_API_KEY`）；没有接入真实文档检索时，输入证据仍仅为
+  Run 的当前受控来源，不能宣称为完整研报研究。
 - **模型边界（阶段二开发边界）**：`backend/app/models` 提供 `ModelGateway`、OpenAI-compatible
   adapter 和 `LegacyModelAdapter` 回滚路径；Prompt 文件按 ID/版本/SHA 记录，模型调用的 token、费用
   和延迟使用统一 usage 契约。离线测试只使用 mock，不调用付费 provider。
@@ -47,7 +62,6 @@ Next.js /scoring ──POST /api/v1/scoring/evaluate──> FastAPI ──> scor
 
 以下是未来设计方向，不是当前实现：
 
-- CrewAI 或其他多 Agent 编排、工作流 worker/队列与异步任务。
 - 持久化 RAG、向量数据库、研报摄取/解析流水线。
 - 认证、授权、租户隔离、审计、速率限制、密钥管理与完整安全运营能力。
 - 生产发布自动化、可观测性平台、成本/模型评估及真实市场数据的可靠性治理。

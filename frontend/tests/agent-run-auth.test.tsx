@@ -39,6 +39,7 @@ describe("agent run authentication", () => {
     const user = userEvent.setup();
 
     render(<AgentRunPanel />);
+    await user.type(screen.getByLabelText("股票代码"), "600519");
     await user.type(screen.getByLabelText("研究问题"), "上证指数走势");
     await user.click(screen.getByRole("button", { name: "启动研究" }));
 

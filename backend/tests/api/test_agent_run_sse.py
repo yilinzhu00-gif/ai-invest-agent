@@ -24,6 +24,7 @@ class FakeAgentRunService:
         self,
         principal: object,
         question: str,
+        symbol: str | None,
         correlation_id: str,
         executor_mode: str = "development_only",
     ) -> SimpleNamespace:
@@ -34,6 +35,7 @@ class FakeAgentRunService:
             created_at=datetime.now(UTC),
             principal=principal,
             question=question,
+            symbol=symbol,
             correlation_id=correlation_id,
         )
         self.runs[run.id] = run
@@ -74,7 +76,7 @@ def test_create_run_returns_202_with_development_executor_contract(client: TestC
     """A synchronous 200 or unlabelled executor would hide an unsafe task boundary."""
     response = client.post(
         "/api/v1/agent/runs",
-        json={"question": "总结贵州茅台的估值风险"},
+        json={"question": "总结贵州茅台的估值风险", "symbol": "600519"},
         headers=DEMO_HEADERS,
     )
 
@@ -82,6 +84,7 @@ def test_create_run_returns_202_with_development_executor_contract(client: TestC
     body = response.json()
     assert body["status"] == "queued"
     assert body["executor_mode"] == "development_only"
+    assert body["symbol"] == "600519"
 
 
 def test_creator_can_query_the_run_created_for_its_workspace(client: TestClient) -> None:

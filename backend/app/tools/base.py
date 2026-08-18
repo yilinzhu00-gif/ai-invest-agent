@@ -13,6 +13,6 @@ class ToolDefinition:
     data_classification: str
     access: str
     idempotent: bool
-    timeout_seconds: int
+    timeout_seconds: float
     max_calls_per_run: int
     handler: Callable[[BaseModel], Awaitable[BaseModel]]

@@ -16,6 +16,8 @@ from backend.app.domain.agent_runs.repository import AgentRunRepository
 from backend.app.domain.agent_runs.schemas import (
     AgentRunEventResponse,
     AgentRunResponse,
+    AgentRunStatus,
+    ConfirmAgentRunRequest,
     CreateAgentRunRequest,
 )
 from backend.app.domain.agent_runs.service import (
@@ -119,6 +121,12 @@ def require_agent_run_permission(principal: RunPrincipal) -> None:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN) from error
 
 
+def require_human_confirmation(principal: RunPrincipal) -> None:
+    """Service-to-service OIDC tokens cannot approve research or requeue failures."""
+    if isinstance(principal, Principal) and not principal.is_human:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
+
+
 async def get_agent_run_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> AgentRunService:
@@ -160,7 +168,11 @@ async def create_agent_run(
     require_agent_run_permission(principal)
     executor_mode = "celery" if request.app.state.settings.app_env == "production" else "development_only"
     run = await service.create(
-        principal, payload.question, get_correlation_id(request), executor_mode=executor_mode
+        principal,
+        payload.question,
+        payload.symbol,
+        get_correlation_id(request),
+        executor_mode=executor_mode,
     )
     executor.submit(run.id, principal)
     return AgentRunResponse.from_model(run)
@@ -190,6 +202,42 @@ async def cancel_agent_run(
         return AgentRunResponse.from_model(await service.cancel(run_id, principal))
     except AgentRunNotFoundError as error:
         raise _not_found() from error
+
+
+@router.post("/{run_id}/confirm", response_model=AgentRunResponse)
+async def confirm_agent_run(
+    run_id: UUID,
+    payload: ConfirmAgentRunRequest,
+    principal: Annotated[RunPrincipal, Depends(get_request_principal)],
+    service: Annotated[AgentRunService, Depends(get_agent_run_service)],
+) -> AgentRunResponse:
+    """Resolve the explicit Human Review gate and optionally retain approved memory."""
+    require_agent_run_permission(principal)
+    require_human_confirmation(principal)
+    try:
+        run = await service.confirm(run_id, principal, approve=payload.decision.value == "approve")
+        return AgentRunResponse.from_model(run)
+    except AgentRunNotFoundError as error:
+        raise _not_found() from error
+
+
+@router.post("/{run_id}/recover", response_model=AgentRunResponse)
+async def recover_agent_run(
+    run_id: UUID,
+    principal: Annotated[RunPrincipal, Depends(get_request_principal)],
+    service: Annotated[AgentRunService, Depends(get_agent_run_service)],
+    executor: Annotated[DevelopmentRunExecutor, Depends(get_development_run_executor)],
+) -> AgentRunResponse:
+    """A person explicitly requeues a failed run from its persisted input/history."""
+    require_agent_run_permission(principal)
+    require_human_confirmation(principal)
+    try:
+        run = await service.recover(run_id, principal)
+    except AgentRunNotFoundError as error:
+        raise _not_found() from error
+    if run.status == AgentRunStatus.QUEUED.value:
+        executor.submit(run.id, principal)
+    return AgentRunResponse.from_model(run)
 
 
 @router.get("/{run_id}/events")

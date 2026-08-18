@@ -27,6 +27,18 @@ def run_agent(self: object, run_id: str, workspace_id: str, principal_id: str) -
             )
         )
     except RetryableWorkerError as error:
+        retries = int(getattr(getattr(self, "request", None), "retries", 0))
+        if retries >= settings.agent_run_max_retries:
+            asyncio.run(
+                fail_agent_run(
+                    run_id=run_id,
+                    workspace_id=workspace_id,
+                    principal_id=principal_id,
+                    error_code=f"retry_exhausted:{error.error_code}",
+                    settings=settings,
+                )
+            )
+            return "failed"
         scheduled = asyncio.run(
             schedule_agent_run_retry(
                 run_id=run_id,
@@ -38,8 +50,11 @@ def run_agent(self: object, run_id: str, workspace_id: str, principal_id: str) -
         )
         if not scheduled:
             return "not_retried"
-        retries = int(getattr(getattr(self, "request", None), "retries", 0))
-        raise self.retry(exc=error, countdown=retry_delay_seconds(retries + 1), max_retries=3)  # type: ignore[attr-defined]
+        raise self.retry(  # type: ignore[attr-defined]
+            exc=error,
+            countdown=retry_delay_seconds(retries + 1),
+            max_retries=settings.agent_run_max_retries,
+        )
     except Exception:
         asyncio.run(
             fail_agent_run(

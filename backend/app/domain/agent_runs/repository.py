@@ -5,7 +5,12 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.domain.agent_runs.models import AgentRun, AgentRunEvent, ConversationMessage
+from backend.app.domain.agent_runs.models import (
+    AgentMemory,
+    AgentRun,
+    AgentRunEvent,
+    ConversationMessage,
+)
 
 
 class AgentRunRepository:
@@ -18,6 +23,7 @@ class AgentRunRepository:
         workspace_id: str,
         principal_id: str,
         question: str,
+        symbol: str | None,
         correlation_id: str,
         executor_mode: str,
     ) -> AgentRun:
@@ -25,6 +31,7 @@ class AgentRunRepository:
             workspace_id=workspace_id,
             principal_id=principal_id,
             question=question,
+            symbol=symbol,
             status="queued",
             executor_mode=executor_mode,
             correlation_id=correlation_id,
@@ -68,5 +75,47 @@ class AgentRunRepository:
             select(AgentRunEvent)
             .where(AgentRunEvent.run_id == run_id, AgentRunEvent.sequence > after_sequence)
             .order_by(AgentRunEvent.sequence)
+        )
+        return list((await self.session.scalars(statement)).all())
+
+    async def append_message(self, run_id: UUID, role: str, content: str) -> ConversationMessage:
+        message = ConversationMessage(run_id=run_id, role=role, content=content)
+        self.session.add(message)
+        await self.session.flush()
+        return message
+
+    async def latest_message(self, run_id: UUID, role: str) -> ConversationMessage | None:
+        statement = (
+            select(ConversationMessage)
+            .where(ConversationMessage.run_id == run_id, ConversationMessage.role == role)
+            .order_by(ConversationMessage.id.desc())
+            .limit(1)
+        )
+        return await self.session.scalar(statement)
+
+    async def create_memory(
+        self, *, workspace_id: str, principal_id: str, source_run_id: UUID, content: str
+    ) -> AgentMemory:
+        memory = AgentMemory(
+            workspace_id=workspace_id,
+            principal_id=principal_id,
+            source_run_id=source_run_id,
+            content=content,
+        )
+        self.session.add(memory)
+        await self.session.flush()
+        return memory
+
+    async def list_memories(
+        self, *, workspace_id: str, principal_id: str, limit: int
+    ) -> list[AgentMemory]:
+        statement = (
+            select(AgentMemory)
+            .where(
+                AgentMemory.workspace_id == workspace_id,
+                AgentMemory.principal_id == principal_id,
+            )
+            .order_by(AgentMemory.created_at.desc(), AgentMemory.id.desc())
+            .limit(limit)
         )
         return list((await self.session.scalars(statement)).all())

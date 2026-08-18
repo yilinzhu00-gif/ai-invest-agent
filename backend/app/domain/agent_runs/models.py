@@ -16,6 +16,7 @@ class AgentRun(Base):
     workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     principal_id: Mapped[str] = mapped_column(String(128), nullable=False)
     question: Mapped[str] = mapped_column(Text, nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(6))
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     executor_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     correlation_id: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -56,6 +57,23 @@ class ConversationMessage(Base):
         Uuid(as_uuid=True), ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False, index=True
     )
     role: Mapped[str] = mapped_column(String(24), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AgentMemory(Base):
+    """Explicitly confirmed reusable context, isolated by workspace and user."""
+
+    __tablename__ = "agent_memories"
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    principal_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    source_run_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

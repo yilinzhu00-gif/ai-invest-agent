@@ -75,6 +75,7 @@ describe("agent run panel", () => {
     const user = userEvent.setup();
 
     render(<AgentRunPanel />);
+    await user.type(screen.getByLabelText("股票代码"), "600519");
     await user.type(screen.getByLabelText("研究问题"), "总结贵州茅台的估值风险");
     await user.click(screen.getByRole("button", { name: "启动研究" }));
 
@@ -100,10 +101,63 @@ describe("agent run panel", () => {
     const user = userEvent.setup();
 
     render(<AgentRunPanel />);
+    await user.type(screen.getByLabelText("股票代码"), "600519");
     await user.type(screen.getByLabelText("研究问题"), "上证指数走势");
     await user.click(screen.getByRole("button", { name: "启动研究" }));
 
     expect(await screen.findByText("研究已完成")).toBeInTheDocument();
+  });
+
+  it("renders the persisted Analyst, Validator, and Reviewer stages", async () => {
+    localStorage.setItem("investment-agent:last-run", "00000000-0000-0000-0000-000000000005");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(response({
+          id: "00000000-0000-0000-0000-000000000005",
+          status: "completed",
+          executor_mode: "development_only",
+        }))
+        .mockResolvedValueOnce(response(
+          "id: 1\nevent: agent.analyst.started\ndata: {\"revision\":0}\n\n"
+          + "id: 2\nevent: agent.validator.completed\ndata: {\"passed\":true,\"error_count\":0}\n\n"
+          + "id: 3\nevent: agent.reviewer.completed\ndata: {\"verdict\":\"approve\"}\n\n",
+          200,
+          "text/event-stream",
+        )),
+    );
+
+    render(<AgentRunPanel />);
+
+    expect(await screen.findByText("Analyst：正在根据证据撰写草稿")).toBeInTheDocument();
+    expect(screen.getByText("Validator：校验通过")).toBeInTheDocument();
+    expect(screen.getByText("Reviewer：审核结论为 approve")).toBeInTheDocument();
+  });
+
+  it("renders a citable market result card instead of leaving the snapshot in the event log", async () => {
+    localStorage.setItem("investment-agent:last-run", "00000000-0000-0000-0000-000000000012");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(response({
+          id: "00000000-0000-0000-0000-000000000012",
+          status: "completed",
+          executor_mode: "development_only",
+          symbol: "600519",
+        }))
+        .mockResolvedValueOnce(response(
+          "id: 1\nevent: research.result\ndata: {\"symbol\":\"600519\",\"summary\":\"基于已提供证据整理。\",\"source\":\"AkShare stock_zh_a_hist (Eastmoney)\",\"boundary\":\"不预测未来走势。\",\"snapshot\":{\"symbol\":\"600519\",\"as_of_date\":\"2026-08-12\",\"close\":1472.5,\"change_percent\":0.86,\"high\":1480,\"low\":1462,\"volume\":120,\"turnover\":1200,\"period_change_percent\":1.55,\"recent_closes\":[{\"date\":\"2026-08-11\",\"close\":1460},{\"date\":\"2026-08-12\",\"close\":1472.5}]}}\n\n",
+          200,
+          "text/event-stream",
+        )),
+    );
+
+    render(<AgentRunPanel />);
+
+    expect(await screen.findByRole("region", { name: "研究结果" })).toBeInTheDocument();
+    expect(screen.getByText("市场快照：600519（截至 2026-08-12）")).toBeInTheDocument();
+    expect(screen.getByText("1,472.5")).toBeInTheDocument();
+    expect(screen.getByText("不预测未来走势。")).toBeInTheDocument();
   });
 
   it("reconnects after a running snapshot and resumes after the last event", async () => {
@@ -130,6 +184,7 @@ describe("agent run panel", () => {
     const user = userEvent.setup();
 
     render(<AgentRunPanel />);
+    await user.type(screen.getByLabelText("股票代码"), "600519");
     await user.type(screen.getByLabelText("研究问题"), "持续追踪研究任务");
     await user.click(screen.getByRole("button", { name: "启动研究" }));
 
@@ -167,6 +222,7 @@ describe("agent run panel", () => {
     const user = userEvent.setup();
 
     render(<AgentRunPanel />);
+    await user.type(screen.getByLabelText("股票代码"), "600519");
     await user.type(screen.getByLabelText("研究问题"), "第一个任务");
     await user.click(screen.getByRole("button", { name: "启动研究" }));
     expect(await screen.findByText("状态：running")).toBeInTheDocument();
@@ -208,6 +264,7 @@ describe("agent run panel", () => {
 
     render(<AgentRunPanel />);
     await user.click(await screen.findByRole("button", { name: "取消任务" }));
+    await user.type(screen.getByLabelText("股票代码"), "600519");
     await user.type(screen.getByLabelText("研究问题"), "新任务");
     await user.click(screen.getByRole("button", { name: "启动研究" }));
     expect(await screen.findByText("状态：completed")).toBeInTheDocument();

@@ -109,6 +109,22 @@ ASCII 数字，`as_of_date` 是严格的 `YYYY-MM-DD` 日历日期，`metrics` �
 - `GET /api/v1/agent/runs/{run_id}`：读取任务状态。
 - `GET /api/v1/agent/runs/{run_id}/events`：返回 `text/event-stream`；事件的整数 `sequence` 是 SSE `id`，客户端可用 `Last-Event-ID` 只重放更晚事件。
 - `POST /api/v1/agent/runs/{run_id}/cancel`：幂等取消；终态不会被逆转。
+- `POST /api/v1/agent/runs/{run_id}/confirm`：仅当任务处于 `awaiting_confirmation` 时，
+  由人工批准或拒绝 Human Review 结果。批准才会保存一条可复用 Memory。
+- `POST /api/v1/agent/runs/{run_id}/recover`：人工把 `failed` 任务重新入队；执行器从已持久化的
+  问题、事件历史和同一用户/工作区的已确认 Memory 重新开始。
+
+页面创建公开 A 股行情研究时应同时提供 6 位 `symbol`，例如：
+
+```json
+{"symbol":"600519","question":"贵州茅台股价走势"}
+```
+
+`symbol` 会与 Run 一起持久化，以便恢复时请求同一标的。开发期执行器经 AkShare 读取最近最多
+6 个交易日的**未复权日线快照**，将其转换为带来源、标的和日期定位信息的 Citation；成功时额外
+持久化 `research.result` SSE 事件，包含收盘价、涨跌幅、日内高低、成交量/额、最近收盘价列表和
+“不预测未来走势”的边界说明。公开数据源不可用时任务会以 `market_data_unavailable` 失败并提供
+恢复入口，绝不以用户问题或陈旧缓存冒充行情。
 
 当前执行器响应中明确标记为 `development_only`。它将事件先持久化到 PostgreSQL，再由 SSE
 读取；它不是生产队列，进程崩溃后只能查询/重放已落库的数据，阶段三将用独立 Worker 替换。
@@ -116,9 +132,16 @@ ASCII 数字，`as_of_date` 是严格的 `YYYY-MM-DD` 日历日期，`metrics` �
 `X-Development-Principal-ID` 与 `X-Development-Workspace-ID`，它们仅用于临时 workspace
 隔离测试，不能视为 OIDC、RBAC 或 RLS。
 
-事件包含 `run.started`、`step.started`、`tool.started`、`tool.finished`、`text.delta`、
-`review.required`、终态事件和 `heartbeat`。事件历史读取结束后返回 heartbeat，客户端据此
-重连；不使用 WebSocket。
+事件包含 `run.started`、`step.started`、`agent.analyst.*`、`agent.validator.*`、
+`agent.reviewer.*`、`agent.flow.*`、`text.delta`、`research.result`、`review.required`、
+`run.awaiting_confirmation`、`memory.saved`、`run.recovery_required`、终态事件和 `heartbeat`。
+其中 `agent.*` 仅包含角色状态、结论和计数，不重复写入草稿或证据正文。事件历史读取结束后返回
+heartbeat，客户端据此重连；不使用 WebSocket。
+
+`agent_memories` 只保存人工批准后的最终摘要，按 `workspace_id + principal_id` 查询，最多注入
+最近 8 条。它们是用户上下文，不是事实证据，不能作为 Citation 支撑结论；拒绝、人为取消、失败和
+未确认的草稿都不会写入 Memory。生产 Worker 对 `run_timeout` 等显式瞬时错误按
+`AGENT_RUN_MAX_RETRIES` 进行有界退避重试；耗尽后事件会提示人工调用 `/recover`，不会静默无限重跑。
 
 ## 错误与关联 ID
 

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import text
 
-from backend.app.domain.agent_runs.models import AgentRun, AgentRunEvent
+from backend.app.domain.agent_runs.models import AgentMemory, AgentRun, AgentRunEvent
 from backend.app.domain.agent_runs.repository import AgentRunRepository
 from backend.app.domain.agent_runs.schemas import AgentRunStatus
 from backend.app.security.principal import Principal
@@ -14,6 +14,7 @@ TERMINAL_STATUSES = {
     AgentRunStatus.COMPLETED.value,
     AgentRunStatus.FAILED.value,
     AgentRunStatus.CANCELLED.value,
+    AgentRunStatus.REJECTED.value,
 }
 
 
@@ -40,6 +41,7 @@ class AgentRunService:
         self,
         principal: RunPrincipal,
         question: str,
+        symbol: str | None,
         correlation_id: str,
         executor_mode: str = "development_only",
     ) -> AgentRun:
@@ -48,6 +50,7 @@ class AgentRunService:
             workspace_id=principal.workspace_id,
             principal_id=principal.principal_id,
             question=question,
+            symbol=symbol,
             correlation_id=correlation_id,
             executor_mode=executor_mode,
         )
@@ -97,6 +100,94 @@ class AgentRunService:
         )
         await self.repository.session.commit()
         return True
+
+    async def record_assistant_message(
+        self, run_id: UUID, principal: RunPrincipal, content: str
+    ) -> None:
+        """Persist the produced answer once so a later confirmation can choose memory."""
+        await self._set_rls_context(principal)
+        run = await self.repository.get_run(run_id, lock=True)
+        self._authorize(run, principal)
+        assert run is not None
+        await self.repository.append_message(run.id, "assistant", content)
+        await self.repository.session.commit()
+
+    async def request_confirmation(
+        self, run_id: UUID, principal: RunPrincipal, *, verdict: str
+    ) -> AgentRun:
+        """Pause only a Human Review outcome; no memory is written at this point."""
+        await self._set_rls_context(principal)
+        run = await self.repository.get_run(run_id, lock=True)
+        self._authorize(run, principal)
+        assert run is not None
+        if run.status in TERMINAL_STATUSES or run.status == AgentRunStatus.AWAITING_CONFIRMATION.value:
+            return run
+        run.status = AgentRunStatus.AWAITING_CONFIRMATION.value
+        await self.repository.append_event(
+            run,
+            "run.awaiting_confirmation",
+            {"verdict": verdict, "actions": ["approve", "reject"]},
+        )
+        await self.repository.session.commit()
+        await self.repository.session.refresh(run)
+        return run
+
+    async def confirm(
+        self, run_id: UUID, principal: RunPrincipal, *, approve: bool
+    ) -> AgentRun:
+        """Resolve the one explicit human gate and optionally persist a memory."""
+        await self._set_rls_context(principal)
+        run = await self.repository.get_run(run_id, lock=True)
+        self._authorize(run, principal)
+        assert run is not None
+        if run.status != AgentRunStatus.AWAITING_CONFIRMATION.value:
+            return run
+        if approve:
+            message = await self.repository.latest_message(run.id, "assistant")
+            if message is not None:
+                # Bounded and explicit: the user approves only the final assistant summary,
+                # never a hidden prompt, raw evidence, secret, or provider response.
+                memory = await self.repository.create_memory(
+                    workspace_id=principal.workspace_id,
+                    principal_id=principal.principal_id,
+                    source_run_id=run.id,
+                    content=message.content[:2_000],
+                )
+                await self.repository.append_event(
+                    run, "memory.saved", {"memory_id": str(memory.id), "source": "human_confirmation"}
+                )
+            run.status = AgentRunStatus.COMPLETED.value
+            await self.repository.append_event(run, "run.confirmed", {"decision": "approve"})
+        else:
+            run.status = AgentRunStatus.REJECTED.value
+            await self.repository.append_event(run, "run.rejected", {"decision": "reject"})
+        await self.repository.session.commit()
+        await self.repository.session.refresh(run)
+        return run
+
+    async def recover(self, run_id: UUID, principal: RunPrincipal) -> AgentRun:
+        """A human may requeue a failed run from its durable input and event history."""
+        await self._set_rls_context(principal)
+        run = await self.repository.get_run(run_id, lock=True)
+        self._authorize(run, principal)
+        assert run is not None
+        if run.status != AgentRunStatus.FAILED.value:
+            return run
+        run.status = AgentRunStatus.QUEUED.value
+        await self.repository.append_event(
+            run,
+            "run.recovery_queued",
+            {"attempt": run.attempt_count, "source": "human_confirmation"},
+        )
+        await self.repository.session.commit()
+        await self.repository.session.refresh(run)
+        return run
+
+    async def list_memory(self, principal: RunPrincipal, *, limit: int = 8) -> list[AgentMemory]:
+        await self._set_rls_context(principal)
+        return await self.repository.list_memories(
+            workspace_id=principal.workspace_id, principal_id=principal.principal_id, limit=limit
+        )
 
     async def list_events(
         self, run_id: UUID, principal: RunPrincipal, after_sequence: int

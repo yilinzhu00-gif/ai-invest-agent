@@ -19,6 +19,19 @@ class Citation(BaseModel):
     text: str = Field(min_length=1, max_length=20_000)
 
 
+class ResearchMemory(BaseModel):
+    """Human-approved, workspace-scoped context from an earlier research run.
+
+    Memories are deliberately not citations.  They can help retain a user's
+    stated research context, but cannot support a factual claim in a draft.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    content: str = Field(min_length=1, max_length=2_000)
+
+
 class ResearchClaim(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -77,6 +90,7 @@ class ResearchRequest(BaseModel):
     workspace_id: UUID
     question: str = Field(min_length=1, max_length=4_000)
     evidence: list[Citation] = Field(default_factory=list, max_length=200)
+    memory: list[ResearchMemory] = Field(default_factory=list, max_length=8)
 
 
 class FlowState(BaseModel):

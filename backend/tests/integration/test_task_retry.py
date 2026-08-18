@@ -20,9 +20,14 @@ def test_celery_routes_workloads_to_isolated_queues_without_result_backend() -> 
     assert app.conf.task_routes["backend.app.workers.tasks.ocr.*"]["queue"] == "ocr"
 
 
-@pytest.mark.parametrize("status,expected", [(429, True), (503, True), (400, False), (403, False)])
-def test_only_transient_provider_errors_are_retried(status: int, expected: bool) -> None:
-    assert should_retry(status_code=status, error_code=None) is expected
+@pytest.mark.parametrize(
+    ("status", "error_code", "expected"),
+    [(429, None, True), (503, None, True), (400, None, False), (403, None, False), (None, "run_timeout", True)],
+)
+def test_only_transient_provider_errors_are_retried(
+    status: int | None, error_code: str | None, expected: bool
+) -> None:
+    assert should_retry(status_code=status, error_code=error_code) is expected
 
 
 def test_celery_agent_task_forwards_the_durable_identity_context(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,11 +81,18 @@ def test_celery_task_persists_a_retry_before_requesting_redelivery(
         scheduled.append("persisted")
         return True
 
+    exhausted: list[str] = []
+
+    async def exhausted_retry(**_kwargs: object) -> None:
+        exhausted.append("failed")
+
     monkeypatch.setattr("backend.app.workers.tasks.execute_claimed_agent_run", transient_failure)
     monkeypatch.setattr("backend.app.workers.tasks.schedule_agent_run_retry", scheduled_retry)
+    monkeypatch.setattr("backend.app.workers.tasks.fail_agent_run", exhausted_retry)
 
     result = run_agent.apply(args=("run-1", "workspace-a", "user-1"))
 
-    assert result.failed()
-    assert isinstance(result.result, RetryableWorkerError)
-    assert scheduled == ["persisted"] * 4
+    assert result.successful()
+    assert result.result == "failed"
+    assert scheduled == ["persisted"] * 3
+    assert exhausted == ["failed"]

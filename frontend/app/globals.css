@@ -18,3 +18,12 @@ fieldset { border: 1px solid #d6dce5; margin: 1rem 0; }
 .dimension { border-top: 1px solid #d6dce5; padding-top: 0.4rem; }
 .agent-run-panel { background: #fff; border: 1px solid #d6dce5; border-radius: 8px; padding: 1rem; }
 .agent-event { border-left: 3px solid #0c5db1; padding-left: 0.6rem; }
+.research-result { background: #fff; border: 1px solid #82b9ef; border-radius: 8px; margin-top: 1rem; padding: 1rem; }
+.research-result h3, .research-result h4 { margin: 0.3rem 0 0.7rem; }
+.market-snapshot { display: grid; gap: 0.6rem; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+.market-snapshot div { background: #f5f9ff; border-radius: 6px; padding: 0.65rem; }
+.market-snapshot dt { color: #4a5868; font-size: 0.85rem; }
+.market-snapshot dd { font-size: 1.1rem; font-weight: 700; margin: 0.25rem 0 0; }
+.recent-closes { display: flex; flex-wrap: wrap; gap: 0.45rem 1rem; list-style: none; padding: 0; }
+.recent-closes li { background: #eef5fc; border-radius: 4px; padding: 0.35rem 0.5rem; }
+.result-source { color: #4a5868; font-size: 0.9rem; }
