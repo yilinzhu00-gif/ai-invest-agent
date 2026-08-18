@@ -87,7 +87,7 @@ services:
         NEXT_PUBLIC_AUTH_MODE: ${NEXT_PUBLIC_AUTH_MODE:?NEXT_PUBLIC_AUTH_MODE must be set}
         NEXT_PUBLIC_OIDC_AUTHORITY: ${NEXT_PUBLIC_OIDC_AUTHORITY:-}
         NEXT_PUBLIC_OIDC_CLIENT_ID: ${NEXT_PUBLIC_OIDC_CLIENT_ID:-}
-        NEXT_PUBLIC_OIDC_SCOPE: ${NEXT_PUBLIC_OIDC_SCOPE:-openid profile email agent:run}
+        NEXT_PUBLIC_OIDC_SCOPE: ${NEXT_PUBLIC_OIDC_SCOPE:-openid profile email agent:run document:read document:write}
         NEXT_PUBLIC_DEVELOPMENT_PRINCIPAL_ID: ${NEXT_PUBLIC_DEVELOPMENT_PRINCIPAL_ID:-}
         NEXT_PUBLIC_DEFAULT_WORKSPACE_ID: ${NEXT_PUBLIC_DEFAULT_WORKSPACE_ID:-}
     depends_on:
@@ -99,17 +99,6 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
-    networks:
-      - application
-
-  legacy:
-    profiles: ["legacy"]
-    build:
-      context: ..
-      dockerfile: backend/Dockerfile
-    command: ["streamlit", "run", "legacy/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
-    volumes:
-      - app_logs:/app/logs
     networks:
       - application
 

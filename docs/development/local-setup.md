@@ -1,6 +1,6 @@
 # 本地开发环境
 
-本仓库当前同时保留三条可独立启动的路径：原有 Streamlit 兼容界面、FastAPI 评分 API、以及 Next.js 评分页面。PostgreSQL/Alembic 是 API 的就绪检查与持久化基线；评分接口本身不需要模型调用。
+本仓库提供 FastAPI 服务与 Next.js 工作台。PostgreSQL/Alembic 是 API 的就绪检查与持久化基线；评分接口本身不需要模型调用。
 
 ## 前置条件
 
@@ -37,7 +37,7 @@ uv sync --locked --all-groups
 npm --prefix frontend ci
 
 uv run ruff check .
-uv run mypy backend/app legacy/scoring.py
+uv run mypy backend/app
 uv run pytest -q
 npm --prefix frontend run lint
 npm --prefix frontend run typecheck
@@ -92,17 +92,6 @@ npm --prefix frontend run dev
 `CORS_ORIGINS=http://localhost:3000,http://localhost:3001` 启动；不要通过禁用 CORS
 绕过该限制。打开 `http://localhost:3000/agent-runs`，development 模式的输出是确定性的
 本地基线，不是真实市场研究。
-
-### Streamlit 兼容路径
-
-Streamlit 是仍受支持的旧界面。只有使用行情、LLM 或 RAG 功能时才需把 `.env.example` 复制为本地 `.env` 并填入自己的模型提供方配置；不要提交 `.env`：
-
-```bash
-cp .env.example .env
-streamlit run legacy/app.py
-```
-
-默认地址为 `http://localhost:8501`。模型或行情连接失败时，先检查本地 `.env`、供应商权限和网络；它们不是离线 CI 的依赖。
 
 ## PostgreSQL 与迁移
 

@@ -8,7 +8,9 @@ from backend.app.ingestion.ocr import OCRExtractor
 from backend.app.ingestion.page_classifier import PageKind, classify_page
 from backend.app.ingestion.schemas import DocumentBlock, ParsedDocument
 
-SUPPORTED_SUFFIXES = {".pdf", ".docx", ".xlsx", ".pptx", ".md", ".html", ".csv", ".png", ".jpg", ".jpeg"}
+SUPPORTED_SUFFIXES = {
+    ".pdf", ".docx", ".xlsx", ".pptx", ".md", ".html", ".csv", ".png", ".jpg", ".jpeg"
+}
 
 
 class DocumentSafetyError(ValueError):
@@ -64,7 +66,11 @@ class DocumentParser:
                         confidence=confidence,
                     )
                 )
-        return ParsedDocument(parser_version=self.parser_version, blocks=blocks)
+        return ParsedDocument(
+            parser_version=self.parser_version,
+            page_count=len(pages),
+            blocks=blocks,
+        )
 
     def _validate_file(self, path: Path) -> None:
         if path.suffix.lower() not in SUPPORTED_SUFFIXES:
@@ -80,9 +86,26 @@ def sha256_file(path: Path) -> str:
 
 
 def _extract_pages(path: Path) -> Sequence[ExtractedPage]:
+    if path.suffix.lower() == ".pdf":
+        return _extract_pdf_pages(path)
     if path.suffix.lower() in {".md", ".html", ".csv"}:
         return [ExtractedPage(1, path.read_text(encoding="utf-8"))]
     return _extract_with_docling(path)
+
+
+def _extract_pdf_pages(path: Path) -> Sequence[ExtractedPage]:
+    """Keep the PDF's real page boundaries for reproducible citations.
+
+    OCR remains an explicit worker concern.  A scanned page therefore has no
+    invented text here and is surfaced to the caller as needing OCR.
+    """
+    from pypdf import PdfReader
+
+    reader = PdfReader(path)
+    return [
+        ExtractedPage(page_number=index, native_text=page.extract_text() or "")
+        for index, page in enumerate(reader.pages, start=1)
+    ]
 
 
 def _extract_with_docling(path: Path) -> Sequence[ExtractedPage]:

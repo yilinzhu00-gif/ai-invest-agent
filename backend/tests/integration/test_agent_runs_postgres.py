@@ -230,8 +230,8 @@ def test_production_bearer_token_uses_active_workspace_membership() -> None:
     assert response.json()["id"]
 
 
-def test_worker_claims_and_completes_a_queued_agent_run(client: "TestClient") -> None:
-    """The worker must atomically claim durable work and persist its terminal state."""
+def test_worker_claims_and_requires_human_review_for_a_queued_agent_run(client: "TestClient") -> None:
+    """The deterministic fallback must not auto-approve a research conclusion."""
     from backend.app.workers.agent_runs import execute_claimed_agent_run
 
     class NoopExecutor:
@@ -256,8 +256,8 @@ def test_worker_claims_and_completes_a_queued_agent_run(client: "TestClient") ->
     )
 
     completed = client.get(f"/api/v1/agent/runs/{run_id}", headers=DEMO_HEADERS)
-    assert outcome == "completed"
-    assert completed.json()["status"] == "completed"
+    assert outcome == "awaiting_confirmation"
+    assert completed.json()["status"] == "awaiting_confirmation"
 
 
 def test_worker_retry_requeues_a_claimed_run_and_records_an_event(client: "TestClient") -> None:

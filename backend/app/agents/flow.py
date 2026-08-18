@@ -6,11 +6,12 @@ from backend.app.agents.schemas import (
     Citation,
     FlowOutcome,
     FlowState,
+    ResearchDraft,
     ResearchRequest,
     ReviewDecision,
     ReviewVerdict,
 )
-from backend.app.agents.validators import EvidenceValidator, ResearchValidator
+from backend.app.agents.validators import EvidenceValidator, ResearchValidator, validate_draft
 
 
 class FlowObserver(Protocol):
@@ -49,15 +50,29 @@ class ControlledResearchFlow:
             await self._notify(
                 "analyst", "completed", {"claim_count": len(state.draft.claims)}
             )
-            await self._notify("validator", "started", {"revision": state.revision_count})
+            await self._notify("numeric_validator", "started", {"revision": state.revision_count})
             state.validation = self.validator.validate(state.draft, request.evidence)
+            if request.require_structured_conclusion:
+                # Keep a custom Validator's own checks, then add the announcement
+                # conclusion contract without allowing the model to bypass it.
+                conclusion_validation = validate_draft(
+                    state.draft,
+                    request.evidence,
+                    require_structured_conclusion=True,
+                )
+                errors = list(dict.fromkeys(
+                    [*state.validation.errors, *conclusion_validation.errors]
+                ))
+                state.validation = state.validation.model_copy(
+                    update={"passed": not errors, "errors": errors}
+                )
             await self._notify(
-                "validator",
+                "numeric_validator",
                 "completed",
                 {"passed": state.validation.passed, "error_count": len(state.validation.errors)},
             )
             if not state.validation.passed:
-                await self._notify("reviewer", "skipped", {"reason": "validator_rejected"})
+                await self._notify("reviewer", "skipped", {"reason": "numeric_validator_rejected"})
                 return FlowOutcome(
                     draft=state.draft,
                     validation=state.validation,
@@ -70,9 +85,9 @@ class ControlledResearchFlow:
             state.review = await self.reviewer.review(
                 state.draft.model_copy(deep=True), list(request.evidence)
             )
-            if not self._review_targets_are_known(state.review, request.evidence):
-                await self._notify("reviewer", "completed", {"verdict": ReviewVerdict.REJECT.value})
-                return self._outcome(state, ReviewVerdict.REJECT)
+            if not self._review_is_complete(state.review, state.draft, request.evidence):
+                await self._notify("reviewer", "completed", {"verdict": ReviewVerdict.HUMAN_REVIEW.value})
+                return self._outcome(state, ReviewVerdict.HUMAN_REVIEW)
             await self._notify("reviewer", "completed", {"verdict": state.review.verdict.value})
             if state.review.verdict is not ReviewVerdict.REVISE:
                 return self._outcome(state, state.review.verdict)
@@ -88,11 +103,28 @@ class ControlledResearchFlow:
             await self.observer.on_stage(role, status, payload)
 
     @staticmethod
-    def _review_targets_are_known(review: ReviewDecision, evidence: list[Citation]) -> bool:
-        # `ReviewDecision` schema makes target presence mandatory for approve/revise;
-        # this guards the remaining cross-agent boundary: targets must refer to evidence.
+    def _review_is_complete(
+        review: ReviewDecision, draft: ResearchDraft, evidence: list[Citation]
+    ) -> bool:
+        """Require the Reviewer to audit every claim/citation pair explicitly."""
         evidence_ids = {citation.id for citation in evidence}
-        return set(review.claim_citation_ids).issubset(evidence_ids)
+        if not set(review.claim_citation_ids).issubset(evidence_ids):
+            return False
+        claims = draft.claims
+        expected_pairs = {
+            (claim_index, citation_id)
+            for claim_index, claim in enumerate(claims)
+            for citation_id in claim.citation_ids
+        }
+        reviewed_pairs = {(item.claim_index, item.citation_id) for item in review.claim_reviews}
+        if reviewed_pairs != expected_pairs or len(reviewed_pairs) != len(review.claim_reviews):
+            return False
+        for checked in review.claim_reviews:
+            if checked.citation_id not in evidence_ids:
+                return False
+            if review.verdict is ReviewVerdict.APPROVE and not checked.supported:
+                return False
+        return True
 
     @staticmethod
     def _outcome(state: FlowState, verdict: ReviewVerdict) -> FlowOutcome:

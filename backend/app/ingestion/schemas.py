@@ -43,5 +43,6 @@ class ParsedDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     parser_version: str
+    page_count: int = Field(ge=0)
     blocks: list[DocumentBlock] = Field(default_factory=list)
     tables: list[ParsedTable] = Field(default_factory=list)

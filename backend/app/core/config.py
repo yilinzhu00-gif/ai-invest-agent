@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     db_max_overflow: int = 10
     db_connect_timeout: float = 5.0
     max_request_body_bytes: int = Field(default=64 * 1024, gt=0)
+    document_upload_max_bytes: int = Field(default=50 * 1024 * 1024, gt=0, le=50 * 1024 * 1024)
     agent_run_timeout_seconds: int = Field(default=180, gt=0, le=3600)
     agent_run_max_retries: int = Field(default=3, ge=0, le=10)
     agent_max_steps: int = Field(default=8, gt=0, le=100)

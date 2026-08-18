@@ -1,6 +1,6 @@
 # AI 投研助手（AI Investment Copilot）
 
-面向个人投资者与金融学习者的研究辅助项目。当前处于从原有 Streamlit 学习应用向 FastAPI 评分 API、Next.js 评分页面与 PostgreSQL/Alembic 基线过渡的阶段。
+面向个人投资者与金融学习者的证据驱动研究辅助项目，提供 FastAPI 服务、Next.js 工作台与 PostgreSQL/Alembic 持久化基线。
 
 > 本项目仅用于技术学习和研究辅助；所有输出均不构成投资建议，不保证数据完整性、及时性或收益，任何交易决定和风险由使用者自行承担。
 
@@ -8,12 +8,11 @@
 
 | 路径 | 状态与用途 |
 | --- | --- |
-| Streamlit | `legacy/app.py` 是兼容入口；`legacy/` 集中保留原有行情、LLM、RAG 与评分实现，涉及模型/行情时需要本地配置。 |
 | FastAPI | `backend.app.main:app` 提供 `/api/v1/health/live`、`/api/v1/health/ready` 与评分接口。 |
-| 评分 API | `POST /api/v1/scoring/evaluate` 调用 `legacy/` 中保留的评分器；数据不足返回 `insufficient_data`，不会给出评级。 |
+| 评分 API | `POST /api/v1/scoring/evaluate` 调用服务端评分器；数据不足返回 `insufficient_data`，不会给出评级。 |
 | Next.js | `frontend/` 提供 `/scoring`，只调用 API，不在浏览器重写评分规则。 |
 | PostgreSQL/Alembic | 数据库就绪检查和 `app_metadata` 初始迁移已具备；API 不会在启动时自动迁移。 |
-| Compose | 包含 PostgreSQL、一次性迁移、API、前端和可选 Streamlit profile 的架构定义。 |
+| Compose | 包含 PostgreSQL、一次性迁移、API 与前端的架构定义。 |
 
 研究任务、Redis/Celery worker 生命周期、OIDC/JWK 后端校验、Workspace membership、监控和备份演练已具备实现。单机 ECS 部署采用 HTTPS/Nginx、OIDC 登录、PostgreSQL、Redis 与 worker；它不等同于 RDS/OSS/多可用区高可用生产架构，具体步骤见[部署文档](docs/operations/deployment.md)。
 
@@ -31,7 +30,7 @@ uv sync --locked --all-groups
 npm --prefix frontend ci
 
 uv run ruff check .
-uv run mypy backend/app legacy/scoring.py
+uv run mypy backend/app
 uv run pytest -q
 npm --prefix frontend run lint
 npm --prefix frontend run typecheck
@@ -62,13 +61,6 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 npm --prefix frontend run dev
 打开 <http://localhost:3000/scoring>。默认 API CORS 来源也是
 `http://localhost:3000`，请勿混用 `127.0.0.1` 作为前端地址。
 
-Streamlit 兼容界面仅在需要旧功能时启动。复制 `.env.example` 为本地 `.env` 后填入自己的模型配置；切勿提交该文件或任何真实凭据：
-
-```bash
-cp .env.example .env
-streamlit run legacy/app.py
-```
-
 ## 数据库与 Compose
 
 数据库迁移需要真实 PostgreSQL 与本地连接串：
@@ -79,18 +71,11 @@ uv run alembic -c backend/alembic.ini upgrade head
 uv run alembic -c backend/alembic.ini current
 ```
 
-Compose 组合架构为 PostgreSQL → 一次性 `migrate` → FastAPI API → Next.js，外加可选 `legacy` Streamlit profile。Docker 是操作方验收的前置条件：本主机 Docker CLI 不可用，因此未在此主机执行 Docker 构建、启动或容器就绪验收。具备 Docker 后可按以下命令运行开发组合：
+Compose 组合架构为 PostgreSQL → 一次性 `migrate` → FastAPI API → Next.js。Docker 是 Compose 运行和验收的前置条件；具备 Docker 后可按以下命令运行开发组合：
 
 ```bash
 cp deploy/env/development.example /tmp/investment-agent.dev.env
 docker compose --env-file /tmp/investment-agent.dev.env \
-  -f deploy/compose.base.yml -f deploy/compose.dev.yml up --build
-```
-
-开发组合发布 `5432`、`8000`、`3000`；可选兼容 UI：
-
-```bash
-docker compose --profile legacy --env-file /tmp/investment-agent.dev.env \
   -f deploy/compose.base.yml -f deploy/compose.dev.yml up --build
 ```
 

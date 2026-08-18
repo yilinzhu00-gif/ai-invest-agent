@@ -55,19 +55,28 @@ class CorrelatedCORSMiddleware(CORSMiddleware):
 class RequestBodyLimitMiddleware:
     """Reject declared and streamed HTTP bodies before request parsing."""
 
-    def __init__(self, app: ASGIApp, max_body_bytes: int) -> None:
+    def __init__(
+        self, app: ASGIApp, max_body_bytes: int, document_upload_max_bytes: int | None = None
+    ) -> None:
         self.app = app
         self.max_body_bytes = max_body_bytes
+        self.document_upload_max_bytes = document_upload_max_bytes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
 
+        is_document_upload = scope["path"].endswith("/documents") and scope["method"] == "POST"
+        max_body_bytes = (
+            self.document_upload_max_bytes
+            if is_document_upload and self.document_upload_max_bytes is not None
+            else self.max_body_bytes
+        )
         content_length = Headers(scope=scope).get("content-length")
         if content_length is not None:
             try:
-                if int(content_length) > self.max_body_bytes:
+                if int(content_length) > max_body_bytes:
                     await self._reject(scope, receive, send)
                     return
             except ValueError:
@@ -82,7 +91,7 @@ class RequestBodyLimitMiddleware:
                 return
             body = message.get("body", b"")
             total += len(body)
-            if total > self.max_body_bytes:
+            if total > max_body_bytes:
                 await self._reject(scope, receive, send)
                 return
             body_parts.append(body)

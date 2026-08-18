@@ -6,6 +6,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.api.v1.agent_runs import get_agent_run_service, get_development_run_executor
+from backend.app.domain.agent_runs.research_brief import (
+    ResearchBriefContent,
+    ResearchBriefVersion,
+    content_sha256,
+)
 from backend.app.domain.agent_runs.schemas import AgentRunStatus
 from backend.app.domain.agent_runs.service import AgentRunNotFoundError
 from backend.app.main import create_app
@@ -19,12 +24,15 @@ DEMO_HEADERS = {
 class FakeAgentRunService:
     def __init__(self) -> None:
         self.runs: dict[UUID, SimpleNamespace] = {}
+        self.briefs: dict[UUID, list[ResearchBriefVersion]] = {}
+        self.brief_decisions: list[tuple[UUID, int, str]] = []
 
     async def create(
         self,
         principal: object,
         question: str,
         symbol: str | None,
+        document_id: UUID | None,
         correlation_id: str,
         executor_mode: str = "development_only",
     ) -> SimpleNamespace:
@@ -36,6 +44,7 @@ class FakeAgentRunService:
             principal=principal,
             question=question,
             symbol=symbol,
+            document_id=document_id,
             correlation_id=correlation_id,
         )
         self.runs[run.id] = run
@@ -52,6 +61,33 @@ class FakeAgentRunService:
         if run.status not in {AgentRunStatus.COMPLETED.value, AgentRunStatus.FAILED.value}:
             run.status = AgentRunStatus.CANCELLED.value
         return run
+
+    async def save_brief_version(
+        self, run_id: UUID, principal: object, content: ResearchBriefContent
+    ) -> ResearchBriefVersion:
+        await self.get(run_id, principal)
+        version = len(self.briefs.setdefault(run_id, [])) + 1
+        saved = ResearchBriefVersion(
+            version=version,
+            content=content,
+            content_sha256=content_sha256(content),
+        )
+        self.briefs[run_id].append(saved)
+        return saved
+
+    async def list_brief_versions(
+        self, run_id: UUID, principal: object
+    ) -> list[ResearchBriefVersion]:
+        await self.get(run_id, principal)
+        return self.briefs.get(run_id, [])
+
+    async def decide_brief_version(
+        self, run_id: UUID, principal: object, version: int, decision: str
+    ) -> None:
+        versions = await self.list_brief_versions(run_id, principal)
+        if not any(item.version == version for item in versions):
+            raise ValueError("brief_version_not_found")
+        self.brief_decisions.append((run_id, version, decision))
 
 
 class FakeDevelopmentExecutor:
@@ -87,6 +123,18 @@ def test_create_run_returns_202_with_development_executor_contract(client: TestC
     assert body["symbol"] == "600519"
 
 
+def test_create_run_persists_the_selected_document_id_in_its_public_contract(client: TestClient) -> None:
+    document_id = "00000000-0000-0000-0000-000000000031"
+    response = client.post(
+        "/api/v1/agent/runs",
+        json={"question": "交易对价是多少", "symbol": "600519", "document_id": document_id},
+        headers=DEMO_HEADERS,
+    )
+
+    assert response.status_code == 202
+    assert response.json()["document_id"] == document_id
+
+
 def test_creator_can_query_the_run_created_for_its_workspace(client: TestClient) -> None:
     """Returning a generated ID without persisted ownership would make refresh recovery impossible."""
     created = client.post(
@@ -118,3 +166,59 @@ def test_cancel_is_idempotent_and_terminal_status_is_not_reversed(client: TestCl
     assert second.status_code == 200
     assert first.json()["status"] == "cancelled"
     assert second.json()["status"] == "cancelled"
+
+
+def test_researcher_can_save_decide_and_export_one_identical_brief_version(client: TestClient) -> None:
+    created = client.post(
+        "/api/v1/agent/runs",
+        json={"question": "交易对价是多少"},
+        headers=DEMO_HEADERS,
+    )
+    run_id = created.json()["id"]
+    citation = {
+        "evidence_id": "document:31:block:7",
+        "filename": "收购报告书.pdf",
+        "document_version": 2,
+        "page_number": 8,
+        "block_id": "7",
+    }
+    content = {
+        "title": "交易研究简报",
+        "summary": "交易对价为 10 亿元。",
+        "data_date": "2026-08-18",
+        "sections": [
+            {"title": "已证实的交易事实", "claims": [{"text": "交易对价为 10 亿元。", "citations": [citation]}]},
+            {"title": "公告后的市场反应", "claims": []},
+            {"title": "可能的影响机制", "claims": []},
+            {"title": "正面因素", "claims": []},
+            {"title": "风险和不确定性", "claims": []},
+        ],
+        "missing_information": ["公告后市场反应数据。"],
+        "confidence": "low",
+        "confidence_rationale": "只有一处直接公告引用。",
+        "risk_disclaimer": "不构成投资建议。",
+    }
+
+    saved = client.post(
+        f"/api/v1/agent/runs/{run_id}/brief/versions",
+        json={"content": content},
+        headers=DEMO_HEADERS,
+    )
+    assert saved.status_code == 201
+    assert saved.json()["version"] == 1
+
+    decision = client.post(
+        f"/api/v1/agent/runs/{run_id}/brief/versions/1/decision",
+        json={"decision": "accept"},
+        headers=DEMO_HEADERS,
+    )
+    assert decision.status_code == 204
+    exported = client.get(
+        f"/api/v1/agent/runs/{run_id}/brief/versions/1/export/markdown",
+        headers=DEMO_HEADERS,
+    )
+    assert exported.status_code == 200
+    assert exported.headers["x-research-brief-version"] == "1"
+    assert saved.json()["content_sha256"] in exported.text
+    assert "交易对价为 10 亿元。" in exported.text
+    assert "收购报告书.pdf · v2 · 第 8 页 · 块 7" in exported.text

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { AppNavigation } from "../components/app-navigation";
 import { AuthProvider } from "../components/auth-provider";
 import "./globals.css";
 
@@ -10,7 +11,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN">
-      <body><AuthProvider>{children}</AuthProvider></body>
+      <body>
+        <AppNavigation />
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

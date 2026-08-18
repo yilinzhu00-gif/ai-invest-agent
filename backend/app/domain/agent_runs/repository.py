@@ -24,6 +24,7 @@ class AgentRunRepository:
         principal_id: str,
         question: str,
         symbol: str | None,
+        document_id: UUID | None,
         correlation_id: str,
         executor_mode: str,
     ) -> AgentRun:
@@ -32,6 +33,7 @@ class AgentRunRepository:
             principal_id=principal_id,
             question=question,
             symbol=symbol,
+            document_id=document_id,
             status="queued",
             executor_mode=executor_mode,
             correlation_id=correlation_id,

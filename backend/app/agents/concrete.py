@@ -10,7 +10,10 @@ from backend.app.agents.analyst import ResearchAnalyst
 from backend.app.agents.reviewer import EvidenceReviewer as EvidenceReviewerProtocol
 from backend.app.agents.schemas import (
     Citation,
+    ClaimCitationReview,
+    ConclusionConfidence,
     ResearchClaim,
+    ResearchConclusion,
     ResearchDraft,
     ResearchRequest,
     ReviewDecision,
@@ -99,7 +102,10 @@ class EvidenceBoundAnalyst(ResearchAnalyst):
     async def produce_draft(
         self, request: ResearchRequest, revision_notes: list[str]
     ) -> ResearchDraft:
-        evidence = request.evidence[:32]
+        # A fixed conclusion section has room for at most six claims.  Keep the
+        # highest-ranked document excerpts within that contract rather than
+        # letting an expansive retrieval leave a Run stuck in the Analyst stage.
+        evidence = request.evidence[:6] if request.require_structured_conclusion else request.evidence[:32]
         claims = [
             ResearchClaim(text=citation.text, citation_ids=[citation.id]) for citation in evidence
         ]
@@ -108,9 +114,26 @@ class EvidenceBoundAnalyst(ResearchAnalyst):
             # use a sentinel citation so the Validator records the hard-gate failure.
             claims = [ResearchClaim(text=request.question, citation_ids=["missing-evidence"])]
         suffix = "；已按 Reviewer 意见修订。" if revision_notes else ""
+        conclusion = None
+        if request.require_structured_conclusion and evidence:
+            conclusion = ResearchConclusion(
+                confirmed_transaction_facts=claims,
+                post_announcement_market_reaction=[],
+                possible_impact_mechanisms=[],
+                positive_factors=[],
+                risks_and_uncertainties=[],
+                missing_information=[
+                    "公告后的市场反应：需要绑定公告日、个股和基准指数的可复算行情窗口。",
+                    "可能的影响机制、正面因素和风险：当前确定性模式不对公告原文作超出摘录的推断。",
+                ],
+                confidence=ConclusionConfidence.LOW,
+                confidence_rationale="本地确定性模式只摘录已检索的公告片段，必须经人工逐条复核后才可作为研究结论。",
+                required_evidence_ids=[citation.id for citation in evidence],
+            )
         return ResearchDraft(
             summary=f"基于 {len(evidence)} 条已提供证据整理的问题：{request.question}{suffix}",
             claims=claims,
+            conclusion=conclusion,
         )
 
 
@@ -123,7 +146,8 @@ class EvidenceReviewer(EvidenceReviewerProtocol):
         evidence_by_id = {citation.id: citation for citation in citations}
         unsupported: list[str] = []
         targets: list[str] = []
-        for claim in draft.claims:
+        claim_reviews: list[ClaimCitationReview] = []
+        for claim_index, claim in enumerate(draft.claims):
             targets.extend(claim.citation_ids)
             cited_text = " ".join(
                 evidence_by_id[citation_id].text
@@ -132,14 +156,31 @@ class EvidenceReviewer(EvidenceReviewerProtocol):
             )
             if claim.text not in cited_text:
                 unsupported.append("将结论改为引用原文，或补充直接支持该结论的证据。")
+            claim_reviews.extend(
+                ClaimCitationReview(
+                    claim_index=claim_index,
+                    citation_id=citation_id,
+                    supported=claim.text in evidence_by_id[citation_id].text,
+                )
+                for citation_id in claim.citation_ids
+                if citation_id in evidence_by_id
+            )
         targets = list(dict.fromkeys(targets))
         if unsupported:
             return ReviewDecision(
                 verdict=ReviewVerdict.REVISE,
                 claim_citation_ids=targets or [citation.id for citation in citations[:1]],
+                claim_reviews=claim_reviews,
                 revision_notes=list(dict.fromkeys(unsupported))[:8],
             )
-        return ReviewDecision(verdict=ReviewVerdict.APPROVE, claim_citation_ids=targets)
+        # This fallback cannot make a substantive investment judgment.  It can
+        # prove the links were inspected, then deliberately stops at the human
+        # gate instead of reproducing the former baseline auto-approval.
+        return ReviewDecision(
+            verdict=ReviewVerdict.HUMAN_REVIEW,
+            claim_citation_ids=targets,
+            claim_reviews=claim_reviews,
+        )
 
 
 @dataclass
@@ -162,6 +203,9 @@ class StructuredModelAnalyst(ResearchAnalyst):
                 "Memory is user-approved context, not factual evidence and must not be cited.",
                 "Return strict JSON matching ResearchDraft.",
                 "Every claim must cite one or more supplied citation ids.",
+                "For announcement research, fill the fixed conclusion object: confirmed_transaction_facts, post_announcement_market_reaction, possible_impact_mechanisms, positive_factors, risks_and_uncertainties, missing_information, confidence, confidence_rationale, required_evidence_ids.",
+                "The top-level claims must exactly be the five factual conclusion sections concatenated in that order; include each key announcement citation in required_evidence_ids.",
+                "Use calculations only when every operand is present in cited evidence; supply operator, operands, and result so the numeric validator can recompute it.",
                 "Do not request tools or permissions.",
             ],
             "question": request.question,
@@ -204,6 +248,7 @@ class StructuredModelReviewer(EvidenceReviewerProtocol):
                 "Use only the supplied draft and evidence.",
                 "Return strict JSON matching ReviewDecision.",
                 "Approve only claims directly supported by their cited excerpts.",
+                "For every draft claim/citation pair, return one claim_reviews item with claim_index, citation_id, and supported=true/false. Never use a blanket approval.",
                 "For revise, provide specific revision_notes. Do not alter evidence.",
             ],
             "draft": draft.model_dump(),

@@ -41,6 +41,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         RequestBodyLimitMiddleware,
         max_body_bytes=current_settings.max_request_body_bytes,
+        document_upload_max_bytes=current_settings.document_upload_max_bytes,
     )
     app.add_middleware(CorrelationIdMiddleware)
     app.add_middleware(

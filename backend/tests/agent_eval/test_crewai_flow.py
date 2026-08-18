@@ -8,6 +8,7 @@ from backend.app.agents.runtime import _load_crewai_flow
 from backend.app.agents.schemas import (
     AgentRuntime,
     Citation,
+    ClaimCitationReview,
     ResearchClaim,
     ResearchDraft,
     ResearchRequest,
@@ -82,9 +83,14 @@ async def test_reviewer_can_request_only_one_targeted_revision() -> None:
             ReviewDecision(
                 verdict=ReviewVerdict.REVISE,
                 claim_citation_ids=["c1"],
+                claim_reviews=[ClaimCitationReview(claim_index=0, citation_id="c1", supported=False)],
                 revision_notes=["补充风险边界"],
             ),
-            ReviewDecision(verdict=ReviewVerdict.APPROVE, claim_citation_ids=["c1"]),
+            ReviewDecision(
+                verdict=ReviewVerdict.APPROVE,
+                claim_citation_ids=["c1"],
+                claim_reviews=[ClaimCitationReview(claim_index=0, citation_id="c1", supported=True)],
+            ),
         ]
     )
 
@@ -94,6 +100,35 @@ async def test_reviewer_can_request_only_one_targeted_revision() -> None:
     assert outcome.revision_count == 1
     assert analyst.calls == 2
     assert reviewer.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_reviewer_must_check_each_citation_not_just_each_claim() -> None:
+    request_with_two_citations = request().model_copy(
+        update={
+            "evidence": [
+                Citation(id="c1", source="announcement.pdf", locator="p.1", text="交易对价为 10 亿元"),
+                Citation(id="c2", source="announcement.pdf", locator="p.2", text="资金来自自有资金"),
+            ]
+        }
+    )
+    analyst = RecordingAnalyst([
+        ResearchDraft(
+            summary="交易摘要",
+            claims=[ResearchClaim(text="交易信息", citation_ids=["c1", "c2"])],
+        )
+    ])
+    reviewer = RecordingReviewer([
+        ReviewDecision(
+            verdict=ReviewVerdict.APPROVE,
+            claim_citation_ids=["c1", "c2"],
+            claim_reviews=[ClaimCitationReview(claim_index=0, citation_id="c1", supported=True)],
+        )
+    ])
+
+    outcome = await ControlledResearchFlow(analyst, reviewer).run(request_with_two_citations)
+
+    assert outcome.verdict is ReviewVerdict.HUMAN_REVIEW
 
 
 @pytest.mark.parametrize("runtime", [AgentRuntime.LANGGRAPH, AgentRuntime.CREWAI])

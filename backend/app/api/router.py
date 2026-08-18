@@ -2,6 +2,8 @@ from fastapi import APIRouter, Request
 from starlette.responses import Response
 
 from backend.app.api.v1.agent_runs import router as agent_runs_router
+from backend.app.api.v1.documents import router as documents_router
+from backend.app.api.v1.market_reactions import router as market_reactions_router
 from backend.app.api.v1.scoring import router as scoring_router
 from backend.app.core.config import Settings
 from backend.app.core.errors import error_response, get_correlation_id
@@ -23,4 +25,6 @@ def build_api_router(settings: Settings) -> APIRouter:
 
     router.include_router(scoring_router)
     router.include_router(agent_runs_router)
+    router.include_router(documents_router)
+    router.include_router(market_reactions_router)
     return router

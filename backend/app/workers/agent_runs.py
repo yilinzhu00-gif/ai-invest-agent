@@ -14,6 +14,11 @@ from backend.app.agents.schemas import (
 )
 from backend.app.core.config import Settings
 from backend.app.db.session import create_session_factory
+from backend.app.domain.agent_runs.document_research import (
+    document_evidence,
+    document_result_payload,
+    insufficient_evidence_payload,
+)
 from backend.app.domain.agent_runs.flow_observer import PersistedFlowObserver
 from backend.app.domain.agent_runs.market_research import (
     market_result_payload,
@@ -22,6 +27,9 @@ from backend.app.domain.agent_runs.market_research import (
 from backend.app.domain.agent_runs.repository import AgentRunRepository
 from backend.app.domain.agent_runs.schemas import AgentRunStatus
 from backend.app.domain.agent_runs.service import AgentRunService, DevelopmentPrincipal
+from backend.app.domain.knowledge.repository import DocumentRepository
+from backend.app.domain.knowledge.service import KnowledgeService
+from backend.app.ingestion.parser import DocumentParser
 from backend.app.tools.market_snapshot import MarketSnapshotUnavailableError, fetch_market_snapshot
 
 
@@ -85,25 +93,57 @@ async def execute_claimed_agent_run(
                     return "cancelled"
                 await service.append_event(parsed_run_id, principal, "step.started", {"step": 1})
                 memories = await service.list_memory(principal)
-                snapshot = await fetch_market_snapshot(run.symbol) if run.symbol else None
-                evidence = (
-                    [market_snapshot_citation(snapshot)]
-                    if snapshot is not None
-                    else [
-                        Citation(
-                            id="worker-run-input",
-                            source="celery-worker",
-                            locator="run-question",
-                            text=run.question,
+                document_items = []
+                snapshot = None
+                document_id = run.document_id
+                if document_id is not None:
+                    results = await KnowledgeService(
+                        DocumentRepository(session), DocumentParser()
+                    ).search(
+                        principal=principal,
+                        query=run.question,
+                        document_id=document_id,
+                        limit=10,
+                    )
+                    document_items = document_evidence(results)
+                    if not document_items:
+                        payload = insufficient_evidence_payload(document_id)
+                        await service.append_event(
+                            parsed_run_id, principal, "research.evidence_result", payload
                         )
-                    ]
-                )
+                        await service.record_assistant_message(
+                            parsed_run_id, principal, str(payload["summary"])
+                        )
+                        terminal = await service.transition(
+                            parsed_run_id,
+                            principal,
+                            AgentRunStatus.REJECTED,
+                            "run.rejected",
+                            {"reason": "key_announcement_evidence_missing", "revision_count": 0},
+                        )
+                        return terminal.status
+                    evidence = [item.citation for item in document_items]
+                else:
+                    snapshot = await fetch_market_snapshot(run.symbol) if run.symbol else None
+                    evidence = (
+                        [market_snapshot_citation(snapshot)]
+                        if snapshot is not None
+                        else [
+                            Citation(
+                                id="worker-run-input",
+                                source="celery-worker",
+                                locator="run-question",
+                                text=run.question,
+                            )
+                        ]
+                    )
                 request = ResearchRequest(
                     run_id=parsed_run_id,
                     workspace_id=uuid5(NAMESPACE_URL, f"worker-workspace:{workspace_id}"),
                     question=run.question,
                     evidence=evidence,
                     memory=[ResearchMemory(id=memory.id, content=memory.content) for memory in memories],
+                    require_structured_conclusion=document_id is not None,
                 )
                 outcome = await run_with_runtime(
                     AgentRuntime(settings.agent_runtime),
@@ -128,7 +168,33 @@ async def execute_claimed_agent_run(
                     {"text": outcome.draft.summary if outcome.draft else "worker 未生成草稿。"},
                 )
                 summary = outcome.draft.summary if outcome.draft else "worker 未生成草稿。"
-                if snapshot is not None:
+                if document_items and outcome.validation.passed and outcome.draft is not None:
+                    await service.append_event(
+                        parsed_run_id,
+                        principal,
+                        "research.evidence_result",
+                        document_result_payload(
+                            summary=summary,
+                            claims=outcome.draft.claims,
+                            evidence=document_items,
+                            conclusion=outcome.draft.conclusion,
+                            status=(
+                                "supported"
+                                if outcome.verdict is ReviewVerdict.APPROVE
+                                else "human_review"
+                            ),
+                        ),
+                    )
+                elif document_items:
+                    assert document_id is not None
+                    summary = "证据不足：草稿未通过引用校验，未生成结论。"
+                    await service.append_event(
+                        parsed_run_id,
+                        principal,
+                        "research.evidence_result",
+                        insufficient_evidence_payload(document_id, summary=summary),
+                    )
+                elif snapshot is not None:
                     await service.append_event(
                         parsed_run_id,
                         principal,
@@ -144,6 +210,15 @@ async def execute_claimed_agent_run(
                         parsed_run_id, principal, verdict=outcome.verdict.value
                     )
                     return awaiting.status
+                if outcome.verdict is ReviewVerdict.REJECT:
+                    rejected = await service.transition(
+                        parsed_run_id,
+                        principal,
+                        AgentRunStatus.REJECTED,
+                        "run.rejected",
+                        {"reason": "research_conclusion_invalid", "revision_count": outcome.revision_count},
+                    )
+                    return rejected.status
                 terminal = await service.transition(
                     parsed_run_id,
                     principal,

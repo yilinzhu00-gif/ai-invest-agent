@@ -17,6 +17,9 @@ class AgentRun(Base):
     principal_id: Mapped[str] = mapped_column(String(128), nullable=False)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     symbol: Mapped[str | None] = mapped_column(String(6))
+    document_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("documents.id", ondelete="RESTRICT"), index=True
+    )
     status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     executor_mode: Mapped[str] = mapped_column(String(32), nullable=False)
     correlation_id: Mapped[str] = mapped_column(String(128), nullable=False)

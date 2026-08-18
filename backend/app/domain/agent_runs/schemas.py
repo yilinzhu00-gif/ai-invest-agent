@@ -28,6 +28,7 @@ class CreateAgentRunRequest(BaseModel):
 
     question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
     symbol: str | None = Field(default=None, pattern=r"^[0-9]{6}$")
+    document_id: UUID | None = None
 
 
 class ConfirmAgentRunRequest(BaseModel):
@@ -41,6 +42,7 @@ class AgentRunResponse(BaseModel):
     status: AgentRunStatus
     executor_mode: str
     symbol: str | None = None
+    document_id: UUID | None = None
     created_at: datetime | None = None
 
     @classmethod
@@ -50,6 +52,7 @@ class AgentRunResponse(BaseModel):
             status=AgentRunStatus(run.status),
             executor_mode=run.executor_mode,
             symbol=getattr(run, "symbol", None),
+            document_id=getattr(run, "document_id", None),
             created_at=run.created_at,
         )
 

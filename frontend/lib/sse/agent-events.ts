@@ -5,6 +5,7 @@ export type AgentEvent = {
 };
 
 function parseRecord(record: string): AgentEvent | null {
+  if (!record.trim()) return null;
   let id: number | null = null;
   let event = "message";
   let data: Record<string, unknown> = {};
@@ -42,6 +43,8 @@ export async function* readAgentEvents(response: Response): AsyncGenerator<Agent
       if (event) yield event;
     }
   }
-  const finalEvent = parseRecord(buffered);
-  if (finalEvent) yield finalEvent;
+  if (buffered.trim()) {
+    const finalEvent = parseRecord(buffered);
+    if (finalEvent) yield finalEvent;
+  }
 }

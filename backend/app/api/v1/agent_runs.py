@@ -6,13 +6,20 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.errors import get_correlation_id
 from backend.app.db.session import get_db_session, get_request_session_factory
 from backend.app.domain.agent_runs.executor import DevelopmentRunExecutor
 from backend.app.domain.agent_runs.repository import AgentRunRepository
+from backend.app.domain.agent_runs.research_brief import (
+    BriefExportFormat,
+    DecideResearchBriefRequest,
+    ResearchBriefVersion,
+    SaveResearchBriefRequest,
+    export_bytes,
+)
 from backend.app.domain.agent_runs.schemas import (
     AgentRunEventResponse,
     AgentRunResponse,
@@ -171,6 +178,7 @@ async def create_agent_run(
         principal,
         payload.question,
         payload.symbol,
+        payload.document_id,
         get_correlation_id(request),
         executor_mode=executor_mode,
     )
@@ -219,6 +227,81 @@ async def confirm_agent_run(
         return AgentRunResponse.from_model(run)
     except AgentRunNotFoundError as error:
         raise _not_found() from error
+
+
+@router.get("/{run_id}/brief/versions", response_model=list[ResearchBriefVersion])
+async def list_research_brief_versions(
+    run_id: UUID,
+    principal: Annotated[RunPrincipal, Depends(get_request_principal)],
+    service: Annotated[AgentRunService, Depends(get_agent_run_service)],
+) -> list[ResearchBriefVersion]:
+    require_agent_run_permission(principal)
+    try:
+        return await service.list_brief_versions(run_id, principal)
+    except AgentRunNotFoundError as error:
+        raise _not_found() from error
+
+
+@router.post("/{run_id}/brief/versions", response_model=ResearchBriefVersion, status_code=status.HTTP_201_CREATED)
+async def save_research_brief_version(
+    run_id: UUID,
+    payload: SaveResearchBriefRequest,
+    principal: Annotated[RunPrincipal, Depends(get_request_principal)],
+    service: Annotated[AgentRunService, Depends(get_agent_run_service)],
+) -> ResearchBriefVersion:
+    require_agent_run_permission(principal)
+    require_human_confirmation(principal)
+    try:
+        return await service.save_brief_version(run_id, principal, payload.content)
+    except AgentRunNotFoundError as error:
+        raise _not_found() from error
+
+
+@router.post("/{run_id}/brief/versions/{version}/decision", status_code=status.HTTP_204_NO_CONTENT)
+async def decide_research_brief_version(
+    run_id: UUID,
+    version: int,
+    payload: DecideResearchBriefRequest,
+    principal: Annotated[RunPrincipal, Depends(get_request_principal)],
+    service: Annotated[AgentRunService, Depends(get_agent_run_service)],
+) -> Response:
+    require_agent_run_permission(principal)
+    require_human_confirmation(principal)
+    try:
+        await service.decide_brief_version(run_id, principal, version, payload.decision)
+    except AgentRunNotFoundError as error:
+        raise _not_found() from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{run_id}/brief/versions/{version}/export/{export_format}")
+async def export_research_brief_version(
+    run_id: UUID,
+    version: int,
+    export_format: BriefExportFormat,
+    principal: Annotated[RunPrincipal, Depends(get_request_principal)],
+    service: Annotated[AgentRunService, Depends(get_agent_run_service)],
+) -> Response:
+    require_agent_run_permission(principal)
+    try:
+        versions = await service.list_brief_versions(run_id, principal)
+    except AgentRunNotFoundError as error:
+        raise _not_found() from error
+    brief = next((item for item in versions if item.version == version), None)
+    if brief is None:
+        raise _not_found()
+    content, media_type, extension = export_bytes(brief, export_format)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="research-brief-v{version}.{extension}"',
+            "X-Research-Brief-Version": str(version),
+            "X-Research-Brief-SHA256": brief.content_sha256,
+        },
+    )
 
 
 @router.post("/{run_id}/recover", response_model=AgentRunResponse)

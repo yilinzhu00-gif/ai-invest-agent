@@ -7,6 +7,11 @@ from sqlalchemy import text
 
 from backend.app.domain.agent_runs.models import AgentMemory, AgentRun, AgentRunEvent
 from backend.app.domain.agent_runs.repository import AgentRunRepository
+from backend.app.domain.agent_runs.research_brief import (
+    ResearchBriefContent,
+    ResearchBriefVersion,
+    content_sha256,
+)
 from backend.app.domain.agent_runs.schemas import AgentRunStatus
 from backend.app.security.principal import Principal
 
@@ -42,6 +47,7 @@ class AgentRunService:
         principal: RunPrincipal,
         question: str,
         symbol: str | None,
+        document_id: UUID | None,
         correlation_id: str,
         executor_mode: str = "development_only",
     ) -> AgentRun:
@@ -51,6 +57,7 @@ class AgentRunService:
             principal_id=principal.principal_id,
             question=question,
             symbol=symbol,
+            document_id=document_id,
             correlation_id=correlation_id,
             executor_mode=executor_mode,
         )
@@ -194,6 +201,59 @@ class AgentRunService:
     ) -> list[AgentRunEvent]:
         await self.get(run_id, principal)
         return await self.repository.list_events(run_id, after_sequence)
+
+    async def save_brief_version(
+        self, run_id: UUID, principal: RunPrincipal, content: ResearchBriefContent
+    ) -> ResearchBriefVersion:
+        """Append a researcher-authored immutable content snapshot to the Run audit trail."""
+        await self._set_rls_context(principal)
+        run = await self.repository.get_run(run_id, lock=True)
+        self._authorize(run, principal)
+        assert run is not None
+        events = await self.repository.list_events(run_id, 0)
+        existing = [event for event in events if event.event_type == "research.brief_version_saved"]
+        version = len(existing) + 1
+        saved = ResearchBriefVersion(
+            version=version,
+            content=content,
+            content_sha256=content_sha256(content),
+        )
+        await self.repository.append_event(
+            run,
+            "research.brief_version_saved",
+            saved.model_dump(mode="json"),
+        )
+        await self.repository.session.commit()
+        return saved
+
+    async def list_brief_versions(
+        self, run_id: UUID, principal: RunPrincipal
+    ) -> list[ResearchBriefVersion]:
+        await self.get(run_id, principal)
+        versions: list[ResearchBriefVersion] = []
+        for event in await self.repository.list_events(run_id, 0):
+            if event.event_type != "research.brief_version_saved":
+                continue
+            versions.append(ResearchBriefVersion.model_validate(event.payload))
+        return versions
+
+    async def decide_brief_version(
+        self, run_id: UUID, principal: RunPrincipal, version: int, decision: str
+    ) -> None:
+        """Record acceptance/rejection without overwriting the saved content version."""
+        await self._set_rls_context(principal)
+        run = await self.repository.get_run(run_id, lock=True)
+        self._authorize(run, principal)
+        assert run is not None
+        versions = await self.list_brief_versions(run_id, principal)
+        if not any(item.version == version for item in versions):
+            raise ValueError("brief_version_not_found")
+        await self.repository.append_event(
+            run,
+            "research.brief_decided",
+            {"version": version, "decision": decision},
+        )
+        await self.repository.session.commit()
 
     async def transition(
         self,

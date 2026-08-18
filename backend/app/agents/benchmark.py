@@ -13,6 +13,7 @@ from backend.app.agents.runtime import run_with_runtime
 from backend.app.agents.schemas import (
     AgentRuntime,
     Citation,
+    ClaimCitationReview,
     ResearchClaim,
     ResearchDraft,
     ResearchRequest,
@@ -37,10 +38,21 @@ class BaselineReviewer:
     allow_delegation = False
 
     async def review(self, draft: ResearchDraft, citations: list[Citation]) -> ReviewDecision:
-        del draft
+        evidence_ids = {citation.id for citation in citations}
         return ReviewDecision(
-            verdict=ReviewVerdict.APPROVE,
+            # A benchmark baseline may measure wiring, but it must not silently
+            # certify an investment conclusion.
+            verdict=ReviewVerdict.HUMAN_REVIEW,
             claim_citation_ids=[citation.id for citation in citations[:1]],
+            claim_reviews=[
+                ClaimCitationReview(
+                    claim_index=index,
+                    citation_id=citation_id,
+                    supported=citation_id in evidence_ids,
+                )
+                for index, claim in enumerate(draft.claims)
+                for citation_id in claim.citation_ids
+            ],
         )
 
 

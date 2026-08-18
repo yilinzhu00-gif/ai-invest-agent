@@ -108,7 +108,7 @@ describe("agent run panel", () => {
     expect(await screen.findByText("研究已完成")).toBeInTheDocument();
   });
 
-  it("renders the persisted Analyst, Validator, and Reviewer stages", async () => {
+  it("renders the persisted Analyst, numeric validator, and Reviewer stages", async () => {
     localStorage.setItem("investment-agent:last-run", "00000000-0000-0000-0000-000000000005");
     vi.stubGlobal(
       "fetch",
@@ -120,7 +120,7 @@ describe("agent run panel", () => {
         }))
         .mockResolvedValueOnce(response(
           "id: 1\nevent: agent.analyst.started\ndata: {\"revision\":0}\n\n"
-          + "id: 2\nevent: agent.validator.completed\ndata: {\"passed\":true,\"error_count\":0}\n\n"
+          + "id: 2\nevent: agent.numeric_validator.completed\ndata: {\"passed\":true,\"error_count\":0}\n\n"
           + "id: 3\nevent: agent.reviewer.completed\ndata: {\"verdict\":\"approve\"}\n\n",
           200,
           "text/event-stream",
@@ -130,7 +130,7 @@ describe("agent run panel", () => {
     render(<AgentRunPanel />);
 
     expect(await screen.findByText("Analyst：正在根据证据撰写草稿")).toBeInTheDocument();
-    expect(screen.getByText("Validator：校验通过")).toBeInTheDocument();
+    expect(screen.getByText("数值校验器：校验通过")).toBeInTheDocument();
     expect(screen.getByText("Reviewer：审核结论为 approve")).toBeInTheDocument();
   });
 

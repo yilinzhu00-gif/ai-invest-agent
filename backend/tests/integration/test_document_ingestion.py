@@ -45,6 +45,23 @@ async def test_low_density_page_uses_ocr_without_duplicate_native_text(tmp_path:
     assert result.blocks[0].confidence == 0.94
 
 
+@pytest.mark.asyncio
+async def test_parser_preserves_the_source_page_number_for_each_native_block(tmp_path: Path) -> None:
+    document = tmp_path / "announcement.md"
+    document.write_text("placeholder")
+    parser = DocumentParser(
+        extractor=lambda _path: [
+            ExtractedPage(4, "第四页交易对价" * 8),
+            ExtractedPage(7, "第七页融资安排" * 8),
+        ]
+    )
+
+    result = await parser.parse_path(document)
+
+    assert result.page_count == 2
+    assert [block.page_number for block in result.blocks] == [4, 7]
+
+
 def table(page: int, unit: str, header: str = "项目") -> ParsedTable:
     return ParsedTable(
         page_number=page,
