@@ -5,27 +5,32 @@ description = "An AI investment research assistant for learning and personal use
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    # Research data and document processing
     "akshare>=1.12",
+    "numpy",
+    "pandas",
+    "pypdf>=6.15.0",
+    "python-docx>=1.2,<2.0",
+    "reportlab>=4.2,<5.0",
+
+    # Service runtime and persistence
     "alembic>=1.14",
     "asyncpg>=0.30",
     "celery>=5.4,<6.0",
-    "crewai>=1.0,<2.0",
     "fastapi>=0.115",
+    "prometheus-client>=0.21,<1.0",
+    "pydantic-settings>=2.7",
+    "python-dotenv",
+    "redis>=5.2,<6.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "uvicorn[standard]>=0.34",
+
+    # Agent orchestration and model access
+    "crewai>=1.0,<2.0",
     "langchain-core>=0.3",
     "langchain-openai>=0.2",
     "langgraph>=0.2",
-    "numpy",
     "openai>=1.0",
-    "pandas",
-    "pydantic-settings>=2.7",
-    "prometheus-client>=0.21,<1.0",
-    "pypdf",
-    "python-docx>=1.2,<2.0",
-    "python-dotenv",
-    "reportlab>=4.2,<5.0",
-    "sqlalchemy[asyncio]>=2.0",
-    "redis>=5.2,<6.0",
-    "uvicorn[standard]>=0.34",
 ]
 
 [project.optional-dependencies]
@@ -35,12 +40,13 @@ document-worker = [
 
 [dependency-groups]
 dev = [
+    "httpx",
     "mypy",
+    "pip-audit",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
     "ruff",
-    "httpx",
 ]
 
 [tool.ruff]

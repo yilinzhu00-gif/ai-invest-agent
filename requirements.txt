@@ -1,9 +1,0 @@
-openai>=1.0
-akshare>=1.12
-pandas
-numpy
-pypdf
-python-dotenv
-langgraph>=0.2
-langchain-core>=0.3
-langchain-openai>=0.2

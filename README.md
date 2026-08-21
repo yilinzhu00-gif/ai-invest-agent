@@ -1,34 +1,97 @@
-# AI 投研助手（AI Investment Copilot）
+# 投研研究工作台
 
-面向个人投资者与金融学习者的证据驱动研究辅助项目，提供 FastAPI 服务、Next.js 工作台与 PostgreSQL/Alembic 持久化基线。
+面向 A 股公告与研报阅读的证据驱动研究辅助系统。它把研究材料、问题、引用、审核决定和导出简报放在一条可追溯的工作流里，而不是根据模型记忆直接给出结论。
 
-> 本项目仅用于技术学习和研究辅助；所有输出均不构成投资建议，不保证数据完整性、及时性或收益，任何交易决定和风险由使用者自行承担。
+> 本项目仅用于研究辅助和技术学习，不构成投资建议、收益承诺或交易指令。任何投资决定及其风险由使用者自行承担。
 
-## 当前已实现
+## 现在能做什么
 
-| 路径 | 状态与用途 |
+| 能力 | 当前行为 |
 | --- | --- |
-| FastAPI | `backend.app.main:app` 提供 `/api/v1/health/live`、`/api/v1/health/ready` 与评分接口。 |
-| 评分 API | `POST /api/v1/scoring/evaluate` 调用服务端评分器；数据不足返回 `insufficient_data`，不会给出评级。 |
-| Next.js | `frontend/` 提供 `/scoring`，只调用 API，不在浏览器重写评分规则。 |
-| PostgreSQL/Alembic | 数据库就绪检查和 `app_metadata` 初始迁移已具备；API 不会在启动时自动迁移。 |
-| Compose | 包含 PostgreSQL、一次性迁移、API 与前端的架构定义。 |
+| 证据库 | 上传公告、研报或其他材料，保存文件版本、来源链接、页码与可检索文本块。 |
+| 自由研究问题 | 选择一份材料并填写六位股票代码和任意研究问题；系统只从选定材料中检索证据。 |
+| 交易事实表 | 对已解析的公告提取可定位原文的交易事实，不用模型常识补齐缺失字段。 |
+| 市场反应 | 以公告日为锚点计算事件窗口、相对沪深 300 与研究员指定行业指数的表现。 |
+| 证据门控研究 | Analyst 起草，独立数值校验器检查引用和计算，Reviewer 逐一检查“结论—引用”对应关系。 |
+| 人工审核 | 证据不足时直接拒绝；审阅不完整或需要修订时进入人工审核，研究员可接受或驳回观点。 |
+| 研究简报 | 研究员编辑后保存不可变版本，并导出 Markdown、PDF 或 Word；导出内容保留来源、页码、数据日期、内容指纹和风险声明。 |
+| 股票评分 | 独立的手工指标评分页，不会替代公告或研报中的证据引用。 |
 
-研究任务、Redis/Celery worker 生命周期、OIDC/JWK 后端校验、Workspace membership、监控和备份演练已具备实现。单机 ECS 部署采用 HTTPS/Nginx、OIDC 登录、PostgreSQL、Redis 与 worker；它不等同于 RDS/OSS/多可用区高可用生产架构，具体步骤见[部署文档](docs/operations/deployment.md)。
+## 研究主链路
 
-## 前置条件
+1. 在 **证据库** 上传并确认材料已解析完成。
+2. 在 **研究任务** 选择材料，输入股票代码和自由描述的问题。
+3. 系统从所选材料检索原文；每条证据都带有文件名、版本、页码和文本块标识。
+4. Analyst 生成草稿，数值校验器核验每个数字与计算，Reviewer 覆盖每一个“结论—引用”对。
+5. 关键公告证据缺失时，任务进入 `rejected`，不会以行情、记忆或常识替代原文。需要人工判断时，任务进入 `awaiting_confirmation`。
+6. 研究员可编辑简报、接受或驳回观点，保存版本后导出。
 
-- CPython `3.12` 与 [uv](https://docs.astral.sh/uv/)
-- Node `24.18.0`、npm `11.16.0`
-- Docker Engine 与 Docker Compose v2（仅 Compose/真实 PostgreSQL 路径需要）
+公告证据简报使用固定结构：
 
-## 快速开始：离线开发检查
+- 已证实的交易事实
+- 公告后的市场反应
+- 可能的影响机制
+- 正面因素
+- 风险和不确定性
+- 尚缺少的信息
+- 结论置信度
+
+## 支持的材料与边界
+
+- 文件大小上限为 50 MiB，页数上限为 500 页。
+- PDF、Markdown、HTML 与 CSV 可直接解析；DOCX、XLSX、PPTX 和图片需安装 `document-worker` 可选依赖；扫描件还需要配置 OCR Worker。
+- 当前研究任务不会自行抓取任意网页或替换用户选择的材料。没有直接证据，就不生成对应结论。
+- 本地开发身份模式会读取公开日线行情快照，但不会调用生产模型；生产环境需要 PostgreSQL、Redis/Celery 和 OIDC 配置。
+
+## 技术架构
+
+```text
+Next.js 工作台
+    │ HTTP / SSE
+FastAPI API ── PostgreSQL（材料、引用、任务、简报版本）
+    │
+Redis / Celery Worker（生产环境的异步任务）
+```
+
+- 前端：Next.js 15、React 19、TypeScript
+- 后端：FastAPI、SQLAlchemy、Alembic、PostgreSQL/pgvector
+- 异步任务：Redis、Celery（生产环境）
+- Agent：LangGraph 为默认运行时；CrewAI 保留为兼容运行时
+- 认证：本地开发身份模式或生产 OIDC；生产接口按 workspace 与权限校验
+
+## 快速启动（推荐：Docker Compose）
+
+前置条件：Docker Engine + Docker Compose v2。
+
+```bash
+cp deploy/env/development.example /tmp/investment-agent.dev.env
+docker compose --env-file /tmp/investment-agent.dev.env \
+  -f deploy/compose.base.yml -f deploy/compose.dev.yml up --build
+```
+
+启动后打开：
+
+- 工作台：<http://localhost:3000>
+- API 健康检查：<http://localhost:8000/api/v1/health/live>
+- OpenAPI：<http://localhost:8000/docs>
+
+上述配置仅用于本地开发，使用本地开发身份，不应作为生产部署配置。
+
+## 本地开发
+
+前置条件：CPython 3.12、[uv](https://docs.astral.sh/uv/)、Node 24.18.0、npm 11.16.0。
 
 ```bash
 uv python install 3.12
 uv sync --locked --all-groups
 npm --prefix frontend ci
+```
 
+Python 依赖只以 `pyproject.toml` 与 `uv.lock` 为准；前端依赖只以 `frontend/package.json` 与 `frontend/package-lock.json` 为准。
+
+运行质量检查：
+
+```bash
 uv run ruff check .
 uv run mypy backend/app
 uv run pytest -q
@@ -38,56 +101,49 @@ npm --prefix frontend run test
 npm --prefix frontend run build
 ```
 
-这些命令不启动 Docker、数据库、外部模型或生产资源。真实 PostgreSQL 集成测试需要显式提供 `TEST_DATABASE_URL`，否则会跳过。
-
-## 本地服务
-
-启动评分 API：
+如果不使用 Compose，需要自行提供 PostgreSQL、Redis、`DATABASE_URL` 和前端环境变量。数据库迁移命令为：
 
 ```bash
-uv run uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-- API 存活检查：<http://127.0.0.1:8000/api/v1/health/live>
-- Swagger：<http://127.0.0.1:8000/docs>
-- OpenAPI：<http://127.0.0.1:8000/openapi.json>
-
-启动前端（先启动 API）：
-
-```bash
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000 npm --prefix frontend run dev
-```
-
-打开 <http://localhost:3000/scoring>。默认 API CORS 来源也是
-`http://localhost:3000`，请勿混用 `127.0.0.1` 作为前端地址。
-
-## 数据库与 Compose
-
-数据库迁移需要真实 PostgreSQL 与本地连接串：
-
-```bash
-export DATABASE_URL='postgresql://investment_agent:local-password@127.0.0.1:5432/investment_agent'
 uv run alembic -c backend/alembic.ini upgrade head
 uv run alembic -c backend/alembic.ini current
 ```
 
-Compose 组合架构为 PostgreSQL → 一次性 `migrate` → FastAPI API → Next.js。Docker 是 Compose 运行和验收的前置条件；具备 Docker 后可按以下命令运行开发组合：
+## 配置说明
 
-```bash
-cp deploy/env/development.example /tmp/investment-agent.dev.env
-docker compose --env-file /tmp/investment-agent.dev.env \
-  -f deploy/compose.base.yml -f deploy/compose.dev.yml up --build
+| 场景 | 配置文件 | 认证方式 |
+| --- | --- | --- |
+| 本地 Compose | `deploy/env/development.example` | 开发身份 |
+| 一般生产部署 | `deploy/env/production.example` | OIDC |
+| 单机部署 | `deploy/env/single-node.example` | OIDC + Nginx/HTTPS |
+
+不要提交实际的 `.env`、数据库密码、OIDC 客户端密钥或 TLS 证书。示例文件仅提供变量名和本地占位值。
+
+## 目录说明
+
+```text
+backend/       FastAPI、Agent 流程、数据模型、迁移与测试
+frontend/      Next.js 工作台与前端测试
+deploy/        Compose、环境变量模板和部署配置
+docs/          架构、API、开发、运维与回滚文档
+evals/         离线评估输入与基准
+load/k6/       k6 压测脚本
+legacy/        仍被股票评分路径使用的兼容代码
+artifacts/     本地生成的评估产物（已忽略，不提交）
+scripts/       运维和验证脚本
+tests/         顶层兼容性测试
 ```
 
-生产组合不发布 PostgreSQL 到主机。使用 `deploy/env/production.example` 的变量名在密钥管理系统中创建外部环境文件，替换全部占位符后再执行生产操作。针对低成本单机 ECS，使用 `deploy/env/single-node.example` 与 `deploy/compose.single-node.yml`，其唯一公网入口是 Nginx 的 80/443，且必须配置 OIDC 与 HTTPS；完整操作见[部署文档](docs/operations/deployment.md)。
+`.venv`、`__pycache__`、`.pytest_cache`、`.mypy_cache`、`.ruff_cache`、`frontend/node_modules` 和 `frontend/.next` 都是本地生成内容，不应提交。
 
-## 文档
+## 相关文档
 
+- [架构与边界](docs/architecture/overview.md)
+- [API 概览](docs/api/overview.md)
 - [本地开发与排错](docs/development/local-setup.md)
-- [Git 与 PR 流程](docs/development/git-workflow.md)
-- [当前架构与边界](docs/architecture/overview.md)
-- [API 契约](docs/api/overview.md)
+- [部署说明](docs/operations/deployment.md)
+- [备份与恢复](docs/operations/backup-restore.md)
+- [回滚 Runbook](docs/runbooks/rollback.md)
 
 ## CI
 
-PR 与相关的 `main` 推送会分别运行后端、前端和镜像构建检查。工作流仅使用 SHA 固定的 GitHub Actions、最小 `contents: read` 权限和非密钥包缓存；它们不注入 API key、不调用模型、不连接生产资源，也不推送镜像。
+GitHub Actions 会对相关改动运行后端检查、前端检查、离线 Agent 评估、容器构建与依赖安全扫描。工作流不注入模型密钥、不调用生产模型，也不推送镜像。

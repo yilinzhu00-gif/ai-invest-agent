@@ -25,3 +25,16 @@ def test_spaces_inside_a_chinese_forecast_question_do_not_hide_financial_terms()
 
     assert "净利润" in terms
     assert "预测" in terms
+
+
+def test_natural_language_question_extracts_a_non_financial_factual_fragment() -> None:
+    terms = retrieval_query_terms("星网锐捷2026年半年报中核心竞争力是什么")
+
+    assert terms[0] == "星网锐捷2026年半年报中核心竞争力"
+    assert "核心竞争力" in terms
+
+
+def test_question_scaffolding_does_not_become_the_only_retrieval_term() -> None:
+    terms = retrieval_query_terms("该公告披露的重大资产重组进展如何")
+
+    assert "重大资产重组进展" in terms
