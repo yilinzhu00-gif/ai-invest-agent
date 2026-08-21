@@ -4,9 +4,17 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-DocumentType = Literal["announcement", "research_report", "other"]
+DocumentType = Literal[
+    "financial_report",
+    "announcement",
+    "research_report",
+    "broker_report",
+    "industry_report",
+    "policy",
+    "other",
+]
 
 
 class DocumentResponse(BaseModel):
@@ -31,6 +39,13 @@ class KnowledgeSearchRequest(BaseModel):
 
 
 class EvidenceSearchResult(BaseModel):
+    """One immutable RAG block with a stable, citation-friendly shape.
+
+    ``text``/``filename``/``page_number`` remain for existing clients.  The
+    normalized fields are deliberately emitted as well so every retrieval
+    consumer can use the same ``content/source/page/date`` contract.
+    """
+
     evidence_id: str
     document_id: UUID
     document_version: int
@@ -42,6 +57,20 @@ class EvidenceSearchResult(BaseModel):
     parser: str
     confidence: float
     bbox: list[float] | None
+    content: str | None = None
+    source: str | None = None
+    page: int | None = None
+    date: str | None = None
+
+    @model_validator(mode="after")
+    def normalize_citation_fields(self) -> "EvidenceSearchResult":
+        if self.content is None:
+            self.content = self.text
+        if self.source is None:
+            self.source = self.filename
+        if self.page is None:
+            self.page = self.page_number
+        return self
 
 
 class KnowledgeSearchResponse(BaseModel):

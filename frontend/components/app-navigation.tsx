@@ -5,9 +5,13 @@ import { usePathname } from "next/navigation";
 
 const navigationItems = [
   { href: "/", label: "研究总览" },
+  { href: "/research-chat", label: "Research Chat" },
+  { href: "/reports", label: "Report View" },
   { href: "/evidence", label: "证据库" },
   { href: "/agent-runs", label: "研究任务" },
+  { href: "/research-create", label: "创建研究" },
   { href: "/scoring", label: "股票评分" },
+  { href: "/evaluation", label: "Agent 评测" },
 ] as const;
 
 export function AppNavigation() {

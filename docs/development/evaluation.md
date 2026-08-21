@@ -10,6 +10,20 @@ uv run python -m backend.app.evals.runner --mode offline --output artifacts/eval
 
 ## 阶段四预研证据工具
 
+## Phase 5 Agent Evaluation
+
+`backend/app/evaluation/metrics.py` 计算五项可复现指标：事实正确率、引用覆盖率、累计费用、平均延迟和工具调用成功率；`evaluator.py` 从 JSONL 读取记录并输出版本化报告。
+
+每条记录可包含以下字段：`expected_facts`/`predicted_facts`、`expected_citation_ids`/`cited_citation_ids`、`cost_usd`（或 `cost_microusd`）、`latency_seconds`（或 `latency_ms`）以及 `tool_calls: [{"success": true}]`。缺少字段会输出 `null`，不会被当作 0 分。
+
+```bash
+UV_CACHE_DIR=.cache/uv uv run python -m backend.app.evaluation.evaluator \
+  --dataset evals/agent/research_cases.jsonl \
+  --output artifacts/evals/phase5.json
+```
+
+Dashboard 位于 `/evaluation`，API 为 `GET /api/v1/evaluation/summary`。`VERIFIED` 只表示五项指标在评测记录中都有覆盖；当前仓库内的既有硬门 fixture 没有真实回答、成本和延迟字段，因此页面会明确显示 `UNVERIFIED`，不能据此宣称 92% 或 85% 的线上效果。
+
 受控 Agent 对照读取三臂离线观察值。输入必须属于同一注册实验并逐 case 使用相同 ID 与输入 SHA-256；同 Token 与专门 Agent 还必须使用相同模型和 Token 预算，默认至少 100 个 case。命令只输出证据判断，不调用模型或修改生产 Flow：
 
 ```bash

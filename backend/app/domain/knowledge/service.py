@@ -105,6 +105,10 @@ class KnowledgeService:
                 parser=block.parser,
                 confidence=block.confidence,
                 bbox=block.bbox,
+                content=block.text,
+                source=document.filename,
+                page=block.page_number,
+                date=document.created_at.date().isoformat() if document.created_at else None,
             )
             for document, block in rows
         ]

@@ -6,6 +6,7 @@ from openai import OpenAI
 
 from backend.app.agents.analyst import ResearchAnalyst
 from backend.app.agents.concrete import (
+    CompletionGateway,
     EvidenceBoundAnalyst,
     EvidenceReviewer,
     RunUsageLedger,
@@ -19,6 +20,18 @@ from backend.app.core.config import Settings
 from backend.app.models.openai_compatible import OpenAICompatibleClient, OpenAICompatibleGateway
 
 
+def build_completion_gateway(settings: Settings) -> CompletionGateway | None:
+    """Build one stateless model adapter; per-run ledgers stay with callers."""
+    if settings.agent_execution_mode == "deterministic":
+        return None
+    assert settings.model_api_key is not None  # Settings validates this invariant.
+    client = OpenAI(
+        api_key=settings.model_api_key.get_secret_value(),
+        base_url=settings.model_base_url,
+    )
+    return OpenAICompatibleGateway(cast(OpenAICompatibleClient, client), provider=settings.model_provider)
+
+
 def build_research_flow(settings: Settings, observer: FlowObserver | None = None) -> ControlledResearchFlow:
     """Build one run-local flow; model credentials are never stored on a Run."""
     analyst: ResearchAnalyst
@@ -27,14 +40,8 @@ def build_research_flow(settings: Settings, observer: FlowObserver | None = None
         analyst = EvidenceBoundAnalyst()
         reviewer = EvidenceReviewer()
     else:
-        assert settings.model_api_key is not None  # Settings validates this invariant.
-        client = OpenAI(
-            api_key=settings.model_api_key.get_secret_value(),
-            base_url=settings.model_base_url,
-        )
-        gateway = OpenAICompatibleGateway(
-            cast(OpenAICompatibleClient, client), provider=settings.model_provider
-        )
+        gateway = build_completion_gateway(settings)
+        assert gateway is not None
         ledger = RunUsageLedger(
             max_tokens=settings.model_run_max_tokens,
             max_cost_microusd=settings.model_run_max_cost_microusd,

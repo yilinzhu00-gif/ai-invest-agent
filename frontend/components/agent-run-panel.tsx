@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { useAuth } from "./auth-provider";
 import { readAgentEvents, type AgentEvent } from "../lib/sse/agent-events";
+import { ResearchTracePanel } from "./research-trace-panel";
 
-type AgentRun = { id: string; status: string; executor_mode: string };
+type AgentWorkflow = "research" | "market_debate";
+type AgentRun = { id: string; status: string; executor_mode: string; workflow?: AgentWorkflow; symbol?: string | null };
 type DailyClose = { date: string; close: number };
 type MarketSnapshot = {
   symbol: string;
@@ -58,6 +60,27 @@ type BriefContent = {
   risk_disclaimer: string;
 };
 type BriefVersion = { version: number; content: BriefContent; content_sha256: string };
+type InstitutionalReport = {
+  title: string;
+  target: string;
+  data_date: string;
+  sections: { title: string; claims: { statement: string; data_support: string; analysis: string; citations: ReportCitationView[] }[] }[];
+  risk_disclaimer: string;
+};
+type ReportCitationView = {
+  evidence_id: string;
+  source: string;
+  locator: string;
+  excerpt: string;
+  content?: string | null;
+  page?: number | null;
+  date?: string | null;
+  source_url?: string | null;
+};
+type DebateClaim = { text: string; evidence_refs: string[]; premises?: string[] };
+type DebateSide = { role: "bull" | "bear"; core_thesis: string; claims: DebateClaim[] };
+type DebateModerator = { consensus: string[]; disagreements: string[]; verification_checklist: string[]; data_gaps: string[] };
+type MarketDebateView = { symbol?: string; bull?: DebateSide; bear?: DebateSide; moderator?: DebateModerator; boundary?: string };
 
 const storageKey = "investment-agent:last-run";
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -86,6 +109,7 @@ function waitForReconnect(signal: AbortSignal): Promise<boolean> {
 
 function renderEvent(event: AgentEvent): string {
   if (typeof event.data.text === "string") return event.data.text;
+  if (event.event === "agent.trace" && typeof event.data.message === "string") return event.data.message;
   if (event.event === "research.evidence_result") {
     if (event.data.status === "insufficient_evidence") return "研究结果：未找到可直接支持该问题的证据";
     if (event.data.status === "human_review") return "研究结果：已找到相关原文，等待人工审核";
@@ -111,6 +135,8 @@ function renderEvent(event: AgentEvent): string {
   if (event.event === "run.failed" && errorCode) {
     return errorCode === "market_data_unavailable"
       ? "任务失败：暂时无法取得公开行情，请稍后恢复任务重试。"
+      : errorCode === "model_not_configured"
+        ? "任务失败：当前开发环境未配置模型；任务已安全停止。"
       : `任务失败：${errorCode}`;
   }
   return labels[event.event] ?? event.event;
@@ -230,6 +256,57 @@ function parseEvidenceResearchResult(event: AgentEvent): EvidenceResearchResult 
   };
 }
 
+function parseInstitutionalReport(event: AgentEvent): InstitutionalReport | null {
+  if (event.event !== "research.report") return null;
+  const data = event.data;
+  if (
+    typeof data.title !== "string" || typeof data.target !== "string" || typeof data.data_date !== "string"
+    || typeof data.risk_disclaimer !== "string" || !Array.isArray(data.sections)
+  ) return null;
+  const sections = data.sections.map((rawSection) => {
+    if (!rawSection || typeof rawSection !== "object" || Array.isArray(rawSection)) return null;
+    const section = rawSection as Record<string, unknown>;
+    if (typeof section.title !== "string" || !Array.isArray(section.claims)) return null;
+    const claims = section.claims.map((rawClaim) => {
+      if (!rawClaim || typeof rawClaim !== "object" || Array.isArray(rawClaim)) return null;
+      const claim = rawClaim as Record<string, unknown>;
+      if (
+        typeof claim.statement !== "string" || typeof claim.data_support !== "string"
+        || typeof claim.analysis !== "string" || !Array.isArray(claim.citations)
+      ) return null;
+      const citations = claim.citations.map((rawCitation) => {
+        if (!rawCitation || typeof rawCitation !== "object" || Array.isArray(rawCitation)) return null;
+        const citation = rawCitation as Record<string, unknown>;
+        return typeof citation.evidence_id === "string" && typeof citation.source === "string"
+          && typeof citation.locator === "string" && typeof citation.excerpt === "string"
+          ? {
+            evidence_id: citation.evidence_id, source: citation.source, locator: citation.locator,
+            excerpt: citation.excerpt,
+            content: typeof citation.content === "string" ? citation.content : null,
+            page: typeof citation.page === "number" ? citation.page : null,
+            date: typeof citation.date === "string" ? citation.date : null,
+            source_url: typeof citation.source_url === "string" ? citation.source_url : null,
+          }
+          : null;
+      });
+      return citations.some((citation) => citation === null)
+        ? null
+        : { statement: claim.statement, data_support: claim.data_support, analysis: claim.analysis, citations: citations as InstitutionalReport["sections"][number]["claims"][number]["citations"] };
+    });
+    return claims.some((claim) => claim === null)
+      ? null
+      : { title: section.title, claims: claims as InstitutionalReport["sections"][number]["claims"] };
+  });
+  if (sections.some((section) => section === null)) return null;
+  return {
+    title: data.title,
+    target: data.target,
+    data_date: data.data_date,
+    risk_disclaimer: data.risk_disclaimer,
+    sections: sections as InstitutionalReport["sections"],
+  };
+}
+
 function numberLabel(value: number | null | undefined, suffix = ""): string {
   return typeof value === "number" ? `${value.toLocaleString("zh-CN")}${suffix}` : "未提供";
 }
@@ -248,9 +325,72 @@ function briefFromEvidenceResult(result: EvidenceResearchResult): BriefContent |
   };
 }
 
+function parseDebateClaim(value: unknown): DebateClaim | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (typeof item.text !== "string" || !Array.isArray(item.evidence_refs)
+    || !item.evidence_refs.every((ref) => typeof ref === "string")) return null;
+  return {
+    text: item.text,
+    evidence_refs: item.evidence_refs as string[],
+    premises: Array.isArray(item.premises) && item.premises.every((premise) => typeof premise === "string")
+      ? item.premises as string[]
+      : [],
+  };
+}
+
+function parseDebateSide(value: unknown, role: DebateSide["role"]): DebateSide | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (item.role !== role || typeof item.core_thesis !== "string" || !Array.isArray(item.claims)) return null;
+  const claims = item.claims.map(parseDebateClaim);
+  if (claims.some((claim) => claim === null)) return null;
+  return { role, core_thesis: item.core_thesis, claims: claims as DebateClaim[] };
+}
+
+function parseDebateModerator(value: unknown): DebateModerator | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  const fields = ["consensus", "disagreements", "verification_checklist", "data_gaps"];
+  if (fields.some((field) => !Array.isArray(item[field]) || !(item[field] as unknown[]).every((entry) => typeof entry === "string"))) return null;
+  return {
+    consensus: item.consensus as string[],
+    disagreements: item.disagreements as string[],
+    verification_checklist: item.verification_checklist as string[],
+    data_gaps: item.data_gaps as string[],
+  };
+}
+
+function parseMarketDebateEvent(event: AgentEvent): Partial<MarketDebateView> | null {
+  if (event.event === "debate.bull") {
+    const bull = parseDebateSide(event.data, "bull");
+    return bull ? { bull } : null;
+  }
+  if (event.event === "debate.bear") {
+    const bear = parseDebateSide(event.data, "bear");
+    return bear ? { bear } : null;
+  }
+  if (event.event === "debate.moderator") {
+    const moderator = parseDebateModerator(event.data);
+    return moderator ? { moderator } : null;
+  }
+  if (event.event !== "debate.result") return null;
+  const bull = parseDebateSide(event.data.bull, "bull");
+  const bear = parseDebateSide(event.data.bear, "bear");
+  const moderator = parseDebateModerator(event.data.moderator);
+  if (!bull || !bear || !moderator) return null;
+  return {
+    symbol: typeof event.data.symbol === "string" ? event.data.symbol : undefined,
+    bull,
+    bear,
+    moderator,
+    boundary: typeof event.data.boundary === "string" ? event.data.boundary : undefined,
+  };
+}
+
 export function AgentRunPanel({ documentId, documentType, requireDocument = false }: {
   documentId?: string;
-  documentType?: "announcement" | "research_report" | "other";
+  documentType?: "financial_report" | "announcement" | "research_report" | "broker_report" | "industry_report" | "policy" | "other";
   requireDocument?: boolean;
 }) {
   const auth = useAuth();
@@ -261,12 +401,20 @@ export function AgentRunPanel({ documentId, documentType, requireDocument = fals
   const [briefDraft, setBriefDraft] = useState<BriefContent | null>(null);
   const [briefVersion, setBriefVersion] = useState<number | null>(null);
   const [briefHistory, setBriefHistory] = useState<BriefVersion[]>([]);
+  const [institutionalReport, setInstitutionalReport] = useState<InstitutionalReport | null>(null);
+  const [selectedCitation, setSelectedCitation] = useState<ReportCitationView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [symbol, setSymbol] = useState("");
+  const [workflow, setWorkflow] = useState<AgentWorkflow>("research");
+  const [debate, setDebate] = useState<MarketDebateView | null>(null);
   const activeSubscription = useRef<AbortController | null>(null);
   const cancelRequest = useRef<AbortController | null>(null);
   const asksForForecast = /预测|预计|目标价|盈利预期|估值/.test(question);
+
+  useEffect(() => {
+    if (run?.workflow) setWorkflow(run.workflow);
+  }, [run?.workflow]);
 
   function replaceActiveSubscription() {
     activeSubscription.current?.abort();
@@ -283,7 +431,7 @@ export function AgentRunPanel({ documentId, documentType, requireDocument = fals
     let lastEventId = 0;
     let currentStatus = initialStatus;
     while (!signal.aborted) {
-      const response = await fetch(`${apiBaseUrl}/api/v1/agent/runs/${runId}/events`, {
+      const response = await fetch(`${apiBaseUrl}/api/v1/research/${runId}/stream`, {
         headers: { ...headers, "Last-Event-ID": String(lastEventId) },
         signal,
       });
@@ -299,6 +447,10 @@ export function AgentRunPanel({ documentId, documentType, requireDocument = fals
           if (parsedResult) setResult(parsedResult);
           const parsedEvidenceResult = parseEvidenceResearchResult(event);
           if (parsedEvidenceResult) setEvidenceResult(parsedEvidenceResult);
+          const parsedReport = parseInstitutionalReport(event);
+          if (parsedReport) setInstitutionalReport(parsedReport);
+          const parsedDebate = parseMarketDebateEvent(event);
+          if (parsedDebate) setDebate((existing) => ({ ...existing, ...parsedDebate }));
           setEvents((existing) => event.id !== null && existing.some((saved) => saved.id === event.id)
             ? existing
             : [...existing, event]);
@@ -393,8 +545,9 @@ export function AgentRunPanel({ documentId, documentType, requireDocument = fals
         headers: { ...headers, "content-type": "application/json" },
         body: JSON.stringify({
           question: question.trim(),
+          workflow,
           symbol: symbol.trim(),
-          document_id: documentId,
+          ...(workflow === "research" && documentId ? { document_id: documentId } : {}),
         }),
         signal: controller.signal,
       });
@@ -405,6 +558,9 @@ export function AgentRunPanel({ documentId, documentType, requireDocument = fals
       setEvents([]);
       setResult(null);
       setEvidenceResult(null);
+      setInstitutionalReport(null);
+      setSelectedCitation(null);
+      setDebate(null);
       setBriefDraft(null);
       setBriefVersion(null);
       setBriefHistory([]);
@@ -520,6 +676,25 @@ export function AgentRunPanel({ documentId, documentType, requireDocument = fals
     URL.revokeObjectURL(url);
   }
 
+  async function downloadInstitutionalReport(exportFormat: "markdown" | "pdf") {
+    if (!run || !auth.requestHeaders) return;
+    const response = await fetch(
+      `${apiBaseUrl}/api/v1/agent/runs/${run.id}/report/export/${exportFormat}`,
+      { headers: auth.requestHeaders },
+    );
+    if (!response.ok) {
+      setError("无法导出机构研究报告。");
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${institutionalReport?.target ?? "research"}-research-report.${exportFormat === "markdown" ? "md" : "pdf"}`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function recoverRun() {
     if (!run || !auth.requestHeaders) return;
     try {
@@ -551,6 +726,13 @@ export function AgentRunPanel({ documentId, documentType, requireDocument = fals
       {auth.mode === "oidc" && auth.status === "unauthenticated" && <button type="button" onClick={() => void auth.signIn()}>登录后启动研究</button>}
       {auth.mode === "oidc" && auth.status === "authenticated" && <button type="button" onClick={() => void auth.signOut()}>退出登录</button>}
       <label>
+        任务类型
+        <select value={workflow} onChange={(event) => setWorkflow(event.target.value as AgentWorkflow)}>
+          <option value="research">证据研究</option>
+          <option value="market_debate">市场事实辩论</option>
+        </select>
+      </label>
+      <label>
         股票代码
         <input
           inputMode="numeric"
@@ -571,12 +753,62 @@ export function AgentRunPanel({ documentId, documentType, requireDocument = fals
           onChange={(event) => setQuestion(event.target.value)}
         />
       </label>
-      {requireDocument && <p className="document-selection-note">问题可自由输入。系统会先检索相关原文；只有原文直接支持的部分才会进入结论，不会用行情、记忆或常识补全。</p>}
-      {requireDocument && asksForForecast && documentType === "announcement" && <p className="evidence-guidance">这是预测 / 估值类问题。当前选中的是公告，仍可启动检索，但若要得到可采纳的预测结论，请补充包含预测表或目标价的研报、业绩预告等材料。</p>}
-      <button type="button" onClick={() => void createRun()} disabled={!question.trim() || !/^\d{6}$/.test(symbol) || (requireDocument && !documentId) || auth.status !== "authenticated"}>启动研究</button>
+      {workflow === "research" && requireDocument && <p className="document-selection-note">问题可自由输入。系统会先检索相关原文；只有原文直接支持的部分才会进入结论，不会用行情、记忆或常识补全。</p>}
+      {workflow === "research" && requireDocument && asksForForecast && documentType === "announcement" && <p className="evidence-guidance">这是预测 / 估值类问题。当前选中的是公告，仍可启动检索，但若要得到可采纳的预测结论，请补充包含预测表或目标价的研报、业绩预告等材料。</p>}
+      {workflow === "market_debate" && <p className="document-selection-note">辩论只消费公开行情、估值和财务底稿；Bull、Bear、Moderator 都必须引用底稿字段，不生成买卖建议。</p>}
+      <button type="button" onClick={() => void createRun()} disabled={!question.trim() || !/^\d{6}$/.test(symbol) || (workflow === "research" && requireDocument && !documentId) || auth.status !== "authenticated"}>启动研究</button>
       {run && <p>状态：{run.status}</p>}
       {run && !terminalStatuses.has(run.status) && (
         <button type="button" onClick={() => void cancelRun()}>取消任务</button>
+      )}
+      {run && <ResearchTracePanel events={events} active={!terminalStatuses.has(run.status)} />}
+      {institutionalReport && run && (
+        <section className="institutional-report" aria-label="机构研究报告">
+          <div className="institutional-report-heading">
+            <div><p className="section-label">REPORT AGENT</p><h3>{institutionalReport.title}</h3><p>数据日期：{institutionalReport.data_date}</p></div>
+            <div><button type="button" onClick={() => void downloadInstitutionalReport("markdown")}>导出 Markdown</button><button type="button" onClick={() => void downloadInstitutionalReport("pdf")}>导出 PDF</button></div>
+          </div>
+          {institutionalReport.sections.map((section) => (
+            <article key={section.title} className="institutional-report-section">
+              <h4>{section.title}</h4>
+              {section.claims.map((claim, index) => (
+                <div key={`${section.title}-${index}`} className="institutional-report-claim">
+                  <p><strong>{claim.statement}</strong></p>
+                  <p><b>Data support：</b>{claim.data_support}</p>
+                  <p><b>Analysis：</b>{claim.analysis}</p>
+                  <ul className="report-citations">
+                    {claim.citations.map((citation) => (
+                      <li key={citation.evidence_id}>
+                        <button type="button" className="citation-link" onClick={() => setSelectedCitation(citation)}>
+                          {citation.source} · {citation.page ? `第 ${citation.page} 页` : citation.locator}
+                          {citation.date ? ` · ${citation.date}` : ""}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </article>
+          ))}
+          <p className="disclaimer">{institutionalReport.risk_disclaimer}</p>
+        </section>
+      )}
+      {selectedCitation && (
+        <div className="citation-dialog-backdrop" role="presentation" onClick={() => setSelectedCitation(null)}>
+          <section className="citation-dialog" role="dialog" aria-modal="true" aria-label="引用来源" onClick={(event) => event.stopPropagation()}>
+            <div className="citation-dialog-heading">
+              <h3>引用来源</h3>
+              <button type="button" onClick={() => setSelectedCitation(null)} aria-label="关闭引用来源">关闭</button>
+            </div>
+            <p><strong>来源：</strong>{selectedCitation.source}</p>
+            <p><strong>定位：</strong>{selectedCitation.page ? `第 ${selectedCitation.page} 页` : selectedCitation.locator}</p>
+            {selectedCitation.date && <p><strong>日期：</strong>{selectedCitation.date}</p>}
+            <blockquote>{selectedCitation.content || selectedCitation.excerpt}</blockquote>
+            {selectedCitation.source_url && (
+              <a href={selectedCitation.source_url} target="_blank" rel="noreferrer">打开来源链接</a>
+            )}
+          </section>
+        </div>
       )}
       {run?.status === "awaiting_confirmation" && (
         <p>
@@ -635,6 +867,33 @@ export function AgentRunPanel({ documentId, documentType, requireDocument = fals
             <p>{evidenceResult.conclusion.confidence}：{evidenceResult.conclusion.confidence_rationale}</p>
           </>}
           <p className="disclaimer">{evidenceResult.boundary}</p>
+        </section>
+      )}
+      {debate && (
+        <section className="research-result" aria-label="市场事实辩论">
+          <h3>市场事实辩论{debate.symbol ? `：${debate.symbol}` : ""}</h3>
+          <div className="debate-grid">
+            {([debate.bull, debate.bear] as (DebateSide | undefined)[]).map((side) => side && (
+              <article key={side.role} className="debate-case">
+                <h4>{side.role === "bull" ? "Bull：支持因素" : "Bear：风险与反证"}</h4>
+                <p>{side.core_thesis}</p>
+                {side.claims.map((claim, index) => (
+                  <div key={`${side.role}-${index}`} className="debate-claim">
+                    <p>{claim.text}</p>
+                    <small>证据：{claim.evidence_refs.join("、")}</small>
+                  </div>
+                ))}
+              </article>
+            ))}
+          </div>
+          {debate.moderator && <article className="debate-moderator">
+            <h4>Moderator：共识、分歧与核验</h4>
+            <p><strong>共识：</strong>{debate.moderator.consensus.join("；") || "暂无"}</p>
+            <p><strong>分歧：</strong>{debate.moderator.disagreements.join("；") || "暂无"}</p>
+            <p><strong>核验清单：</strong>{debate.moderator.verification_checklist.join("；")}</p>
+            <p><strong>数据缺口：</strong>{debate.moderator.data_gaps.join("；") || "暂无"}</p>
+          </article>}
+          {debate.boundary && <p className="disclaimer">{debate.boundary}</p>}
         </section>
       )}
       {briefDraft && run && (

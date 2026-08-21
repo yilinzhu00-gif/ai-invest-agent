@@ -12,6 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.errors import get_correlation_id
 from backend.app.db.session import get_db_session, get_request_session_factory
 from backend.app.domain.agent_runs.executor import DevelopmentRunExecutor
+from backend.app.domain.agent_runs.institutional_report import (
+    InstitutionalReportContent,
+    ReportExportFormat,
+    export_report_bytes,
+)
 from backend.app.domain.agent_runs.repository import AgentRunRepository
 from backend.app.domain.agent_runs.research_brief import (
     BriefExportFormat,
@@ -174,14 +179,22 @@ async def create_agent_run(
 ) -> AgentRunResponse:
     require_agent_run_permission(principal)
     executor_mode = "celery" if request.app.state.settings.app_env == "production" else "development_only"
-    run = await service.create(
+    create_args = (
         principal,
         payload.question,
         payload.symbol,
         payload.document_id,
         get_correlation_id(request),
-        executor_mode=executor_mode,
     )
+    if payload.workflow.value == "research":
+        # Preserve the small dependency-override contract used by existing local clients.
+        run = await service.create(*create_args, executor_mode=executor_mode)
+    else:
+        run = await service.create(
+            *create_args,
+            executor_mode=executor_mode,
+            workflow=payload.workflow.value,
+        )
     executor.submit(run.id, principal)
     return AgentRunResponse.from_model(run)
 
@@ -274,6 +287,49 @@ async def decide_research_brief_version(
     except ValueError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _latest_institutional_report(
+    run_id: UUID, principal: RunPrincipal, service: AgentRunService
+) -> InstitutionalReportContent:
+    try:
+        events = await service.list_events(run_id, principal, 0)
+    except AgentRunNotFoundError as error:
+        raise _not_found() from error
+    report_event = next(
+        (event for event in reversed(events) if event.event_type == "research.report"),
+        None,
+    )
+    if report_event is None:
+        raise _not_found()
+    return InstitutionalReportContent.model_validate(report_event.payload)
+
+
+@router.get("/{run_id}/report", response_model=InstitutionalReportContent)
+async def get_institutional_report(
+    run_id: UUID,
+    principal: Annotated[RunPrincipal, Depends(get_request_principal)],
+    service: Annotated[AgentRunService, Depends(get_agent_run_service)],
+) -> InstitutionalReportContent:
+    require_agent_run_permission(principal)
+    return await _latest_institutional_report(run_id, principal, service)
+
+
+@router.get("/{run_id}/report/export/{export_format}")
+async def export_institutional_report(
+    run_id: UUID,
+    export_format: ReportExportFormat,
+    principal: Annotated[RunPrincipal, Depends(get_request_principal)],
+    service: Annotated[AgentRunService, Depends(get_agent_run_service)],
+) -> Response:
+    require_agent_run_permission(principal)
+    report = await _latest_institutional_report(run_id, principal, service)
+    content, media_type, extension = export_report_bytes(report, export_format)
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{report.target}-research-report.{extension}"'},
+    )
 
 
 @router.get("/{run_id}/brief/versions/{version}/export/{export_format}")

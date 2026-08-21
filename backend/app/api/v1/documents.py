@@ -48,7 +48,10 @@ async def upload_document(
     content: Annotated[bytes, Body(media_type="application/octet-stream")],
     filename: Annotated[str, Query(min_length=1, max_length=512)],
     document_type: Annotated[DocumentType, Query()] = "other",
-    symbol: Annotated[str | None, Query(pattern=r"^[0-9]{6}$")] = None,
+    # A document may describe an A-share, an overseas ticker, or an industry
+    # policy without a ticker.  Market-data endpoints keep their stricter
+    # six-digit A-share contract; the evidence library does not.
+    symbol: Annotated[str | None, Query(pattern=r"^[A-Za-z0-9.-]{1,6}$")] = None,
     source_url: Annotated[str | None, Query(max_length=2048)] = None,
     principal: Annotated[RunPrincipal, Depends(get_request_principal)] = None,  # type: ignore[assignment]
     service: Annotated[KnowledgeService, Depends(get_knowledge_service)] = None,  # type: ignore[assignment]

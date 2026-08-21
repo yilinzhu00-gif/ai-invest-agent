@@ -12,7 +12,7 @@ from backend.app.domain.agent_runs.research_brief import (
     content_sha256,
 )
 from backend.app.domain.agent_runs.schemas import AgentRunStatus
-from backend.app.domain.agent_runs.service import AgentRunNotFoundError
+from backend.app.domain.agent_runs.service import AgentRunNotFoundError, DevelopmentPrincipal
 from backend.app.main import create_app
 
 DEMO_HEADERS = {
@@ -26,6 +26,7 @@ class FakeAgentRunService:
         self.runs: dict[UUID, SimpleNamespace] = {}
         self.briefs: dict[UUID, list[ResearchBriefVersion]] = {}
         self.brief_decisions: list[tuple[UUID, int, str]] = []
+        self.events: dict[UUID, list[SimpleNamespace]] = {}
 
     async def create(
         self,
@@ -35,6 +36,7 @@ class FakeAgentRunService:
         document_id: UUID | None,
         correlation_id: str,
         executor_mode: str = "development_only",
+        workflow: str = "research",
     ) -> SimpleNamespace:
         run = SimpleNamespace(
             id=uuid4(),
@@ -46,6 +48,7 @@ class FakeAgentRunService:
             symbol=symbol,
             document_id=document_id,
             correlation_id=correlation_id,
+            workflow=workflow,
         )
         self.runs[run.id] = run
         return run
@@ -55,6 +58,16 @@ class FakeAgentRunService:
         if run is None or run.principal != principal:
             raise AgentRunNotFoundError
         return run
+
+    async def list_events(
+        self, run_id: UUID, principal: object, after_sequence: int
+    ) -> list[SimpleNamespace]:
+        await self.get(run_id, principal)
+        return [
+            event
+            for event in self.events.get(run_id, [])
+            if event.sequence > after_sequence
+        ]
 
     async def cancel(self, run_id: UUID, principal: object) -> SimpleNamespace:
         run = await self.get(run_id, principal)
@@ -121,6 +134,58 @@ def test_create_run_returns_202_with_development_executor_contract(client: TestC
     assert body["status"] == "queued"
     assert body["executor_mode"] == "development_only"
     assert body["symbol"] == "600519"
+
+
+def test_create_market_debate_run_exposes_explicit_workflow(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/agent/runs",
+        json={
+            "workflow": "market_debate",
+            "symbol": "600519",
+            "question": "整理支持与风险",
+        },
+        headers=DEMO_HEADERS,
+    )
+
+    assert response.status_code == 202
+    assert response.json()["workflow"] == "market_debate"
+
+
+def test_market_debate_events_are_replayable_from_last_event_id() -> None:
+    app = create_app()
+    service = FakeAgentRunService()
+    app.dependency_overrides[get_agent_run_service] = lambda: service
+    app.dependency_overrides[get_development_run_executor] = lambda: FakeDevelopmentExecutor()
+    run_id = uuid4()
+    principal = DevelopmentPrincipal(principal_id="analyst-1", workspace_id="workspace-a")
+    service.runs[run_id] = SimpleNamespace(
+        id=run_id,
+        status=AgentRunStatus.COMPLETED.value,
+        executor_mode="development_only",
+        workflow="market_debate",
+        created_at=datetime.now(UTC),
+        principal=principal,
+        question="整理支持与风险",
+        symbol="600519",
+        document_id=None,
+        correlation_id="corr-1",
+    )
+    service.events[run_id] = [
+        SimpleNamespace(sequence=1, event_type="debate.bull", payload={"role": "bull"}),
+        SimpleNamespace(sequence=2, event_type="debate.bear", payload={"role": "bear"}),
+        SimpleNamespace(sequence=3, event_type="debate.moderator", payload={"consensus": []}),
+    ]
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/v1/agent/runs/{run_id}/events",
+            headers=DEMO_HEADERS | {"Last-Event-ID": "1"},
+        )
+
+    assert response.status_code == 200
+    assert "id: 2" in response.text
+    assert "event: debate.bear" in response.text
+    assert "event: debate.bull" not in response.text
+    assert "event: debate.moderator" in response.text
 
 
 def test_create_run_persists_the_selected_document_id_in_its_public_contract(client: TestClient) -> None:

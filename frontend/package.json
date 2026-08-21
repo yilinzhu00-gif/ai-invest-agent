@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "9.33.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "6.6.4",
     "@testing-library/react": "16.3.0",
     "@testing-library/user-event": "14.6.1",
@@ -38,6 +39,7 @@
     "eslint-config-next": "15.5.22",
     "globals": "16.3.0",
     "jsdom": "26.1.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "5.9.2",
     "typescript-eslint": "8.39.0",
     "vitest": "3.2.4"

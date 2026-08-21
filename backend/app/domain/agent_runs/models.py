@@ -16,6 +16,12 @@ class AgentRun(Base):
     workspace_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     principal_id: Mapped[str] = mapped_column(String(128), nullable=False)
     question: Mapped[str] = mapped_column(Text, nullable=False)
+    target: Mapped[str | None] = mapped_column(String(32), index=True)
+    research_type: Mapped[str | None] = mapped_column(String(32))
+    depth: Mapped[str] = mapped_column(String(24), nullable=False, default="standard")
+    time_range: Mapped[str] = mapped_column(String(64), nullable=False, default="recent_1y")
+    output_format: Mapped[str] = mapped_column(String(16), nullable=False, default="markdown")
+    workflow: Mapped[str] = mapped_column(String(32), nullable=False, default="research")
     symbol: Mapped[str | None] = mapped_column(String(6))
     document_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("documents.id", ondelete="RESTRICT"), index=True

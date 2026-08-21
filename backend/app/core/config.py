@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:3000"
     database_url: str | None = None
+    redis_url: str = "redis://localhost:6379/0"
+    vector_store: Literal["pgvector", "chroma", "milvus"] = "pgvector"
+    vector_collection: str = "investment-agent-evidence"
     oidc_issuer: str | None = None
     oidc_audience: str | None = None
     oidc_jwks_url: str | None = None
@@ -50,6 +53,8 @@ class Settings(BaseSettings):
     embed_model: str = "text-embedding-3-small"
     model_run_max_tokens: int = Field(default=16_000, gt=0)
     model_run_max_cost_microusd: int = Field(default=1_000_000, gt=0)
+    evaluation_dataset_path: str = "evals/agent/research_cases.jsonl"
+    evaluation_report_path: str = "artifacts/evals/phase5.json"
 
     @model_validator(mode="after")
     def require_database_url_in_production(self) -> "Settings":

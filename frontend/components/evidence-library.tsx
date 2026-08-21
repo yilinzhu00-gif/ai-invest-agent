@@ -8,7 +8,7 @@ type UploadedDocument = {
   id: string;
   filename: string;
   symbol: string | null;
-  document_type: "announcement" | "research_report" | "other";
+  document_type: "financial_report" | "announcement" | "research_report" | "broker_report" | "industry_report" | "policy" | "other";
   source_url: string | null;
   version: number;
   status: string;
@@ -136,7 +136,7 @@ export function EvidenceLibrary() {
   const [error, setError] = useState<string | null>(null);
 
   async function upload() {
-    if (!file || !auth.requestHeaders || !/^\d{6}$/.test(symbol)) return;
+    if (!file || !auth.requestHeaders) return;
     setBusy(true);
     setError(null);
     try {
@@ -232,15 +232,18 @@ export function EvidenceLibrary() {
       <p>首版支持 PDF、MD、HTML、CSV；只保存解析出的可引用文本块，来源链接仅作登记，不会由系统主动下载。</p>
       <div className="form-grid form-grid--base">
         <label>
-          股票代码
-          <input inputMode="numeric" maxLength={6} placeholder="例如 600519" value={symbol}
-            onChange={(event) => setSymbol(event.target.value.replace(/\D/g, ""))} />
+          股票代码 / 标的（可选）
+          <input aria-label="股票代码" maxLength={6} placeholder="例如 600519 或 NVDA" value={symbol}
+            onChange={(event) => setSymbol(event.target.value.replace(/[^a-zA-Z0-9.-]/g, "").toUpperCase())} />
         </label>
         <label>
           文档类型
           <select value={documentType} onChange={(event) => setDocumentType(event.target.value as UploadedDocument["document_type"])}>
             <option value="announcement">公司公告</option>
-            <option value="research_report">券商研报</option>
+            <option value="financial_report">财报 / 年报</option>
+            <option value="broker_report">券商研报</option>
+            <option value="industry_report">行业报告</option>
+            <option value="policy">政策文件</option>
             <option value="other">其他材料</option>
           </select>
         </label>
@@ -253,7 +256,7 @@ export function EvidenceLibrary() {
           <input type="file" accept=".pdf,.md,.html,.csv" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
         </label>
       </div>
-      <button type="button" onClick={() => void upload()} disabled={!file || !/^\d{6}$/.test(symbol) || auth.status !== "authenticated" || busy}>
+      <button type="button" onClick={() => void upload()} disabled={!file || auth.status !== "authenticated" || busy}>
         上传并解析
       </button>
       {error && <p className="error-card" role="alert">{error}</p>}

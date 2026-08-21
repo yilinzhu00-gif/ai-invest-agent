@@ -12,7 +12,7 @@ type EvidenceDocument = {
   status: string;
   symbol: string | null;
   page_count: number;
-  document_type: "announcement" | "research_report" | "other";
+  document_type: "financial_report" | "announcement" | "research_report" | "broker_report" | "industry_report" | "policy" | "other";
 };
 
 const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -53,10 +53,10 @@ export function ResearchTaskWorkspace() {
           已上传公告 / 研报
           <select value={documentId} onChange={(event) => setDocumentId(event.target.value)} disabled={!documents.length}>
             {documents.length === 0 && <option value="">暂无可用文档</option>}
-            {documents.map((document) => <option key={document.id} value={document.id}>{document.filename} · {document.document_type === "research_report" ? "研报" : document.document_type === "announcement" ? "公告" : "其他材料"} · v{document.version} · {document.page_count} 页</option>)}
+            {documents.map((document) => <option key={document.id} value={document.id}>{document.filename} · {documentTypeLabel(document.document_type)} · v{document.version} · {document.page_count} 页</option>)}
           </select>
         </label>
-        {selectedDocument && <p className="document-selection-note">当前材料：{selectedDocument.document_type === "research_report" ? "研报，可用于核对其中明确披露的预测与观点" : selectedDocument.document_type === "announcement" ? "公告，可用于核对已披露事实；预测类问题通常还需要研报或业绩预告" : "其他材料，请先核对其是否直接覆盖你的问题"}。</p>}
+        {selectedDocument && <p className="document-selection-note">当前材料：{documentTypeGuidance(selectedDocument.document_type)}。</p>}
         {!documents.length && !error && <p className="missing-evidence">请先在“上传公告 / 研报”中建立可检索证据。</p>}
         {error && <p className="error-card" role="alert">{error}</p>}
       </section>
@@ -67,4 +67,25 @@ export function ResearchTaskWorkspace() {
       />
     </>
   );
+}
+
+function documentTypeLabel(type: EvidenceDocument["document_type"]): string {
+  return {
+    financial_report: "财报 / 年报",
+    announcement: "公告",
+    research_report: "研报",
+    broker_report: "券商研报",
+    industry_report: "行业报告",
+    policy: "政策文件",
+    other: "其他材料",
+  }[type];
+}
+
+function documentTypeGuidance(type: EvidenceDocument["document_type"]): string {
+  if (type === "announcement") return "公告，可用于核对已披露事实";
+  if (type === "financial_report") return "财报 / 年报，可用于核对经营、财务与风险披露";
+  if (type === "broker_report" || type === "research_report") return "研报，可用于核对明确披露的预测与观点";
+  if (type === "industry_report") return "行业报告，可用于核对竞争格局与行业趋势";
+  if (type === "policy") return "政策文件，可用于核对政策约束与影响";
+  return "其他材料，请先核对其是否直接覆盖你的问题";
 }

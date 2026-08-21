@@ -23,6 +23,7 @@ COPY --chown=app:app backend/__init__.py ./backend/__init__.py
 COPY --chown=app:app backend/app ./backend/app
 COPY --chown=app:app backend/alembic ./backend/alembic
 COPY --chown=app:app backend/alembic.ini ./backend/alembic.ini
+COPY --chown=app:app mcp_server ./mcp_server
 USER app
 EXPOSE 8000
 CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

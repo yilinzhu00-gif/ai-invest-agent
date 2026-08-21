@@ -82,7 +82,7 @@ docker-compose --env-file /opt/investment-agent/.env \
   -e BOOTSTRAP_WORKSPACE_ID='<workspace-id>' \
   -e BOOTSTRAP_USER_ID='<idaas-user-sub>' \
   -e BOOTSTRAP_WORKSPACE_ROLE='owner' \
-  api python -m backend.app.operations.bootstrap_workspace
+  backend python -m backend.app.operations.bootstrap_workspace
 ```
 
 The command is idempotent: it creates a missing membership and will not overwrite an existing one.
@@ -96,7 +96,7 @@ Verify only through HTTPS and Nginx:
 curl -I https://aiinvestmentagent.cn
 ```
 
-Expected: `/api/v1/health/ready` succeeds and the root response contains `Strict-Transport-Security`. Then sign in through IDaaS, visit `/agent-runs`, and create a task. Verify `docker-compose ... ps` shows `api`, `frontend`, `worker`, `redis`, `postgres` and `nginx` running; `migrate` exits successfully.
+Expected: `/api/v1/health/ready` succeeds and the root response contains `Strict-Transport-Security`. Then sign in through IDaaS, visit `/agent-runs`, and create a task. Verify `docker-compose ... ps` shows `backend`, `frontend`, `worker`, `redis`, `postgres`, `vector-db` and `nginx` running; `migrate` exits successfully. The backend still publishes the internal `api` network alias for older operator configuration.
 
 For an update, first fetch a reviewed commit, then rebuild:
 

@@ -21,6 +21,26 @@ services:
     networks:
       - application
 
+  # Keep relational data and the vector index on separate volumes/services.
+  # The application currently uses PostgreSQL/pgvector for its durable schema;
+  # this service is the isolated vector-db boundary for the production rollout.
+  vector-db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${VECTOR_DB_NAME:-investment_vectors}
+      POSTGRES_USER: ${VECTOR_DB_USER:-investment_vectors}
+      POSTGRES_PASSWORD: ${VECTOR_DB_PASSWORD:-change-me-vector-development-only}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    volumes:
+      - vector_db_data:/var/lib/postgresql/data
+    networks:
+      - application
+
   migrate:
     build:
       context: ..
@@ -34,20 +54,25 @@ services:
         condition: service_healthy
     volumes:
       - app_logs:/app/logs
-    networks:
-      - application
+    networks: [application]
 
-  api:
+  backend:
     build:
       context: ..
       dockerfile: backend/Dockerfile
+    image: ${BACKEND_IMAGE:-investment-agent-backend:local}
     environment:
       APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      VECTOR_STORE: ${VECTOR_STORE:-pgvector}
+      VECTOR_DB_URL: ${VECTOR_DB_URL:-postgresql://${VECTOR_DB_USER:-investment_vectors}:${VECTOR_DB_PASSWORD:-change-me-vector-development-only}@vector-db:5432/${VECTOR_DB_NAME:-investment_vectors}}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     depends_on:
       migrate:
         condition: service_completed_successfully
+      vector-db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=3).read()"]
       interval: 10s
@@ -56,8 +81,11 @@ services:
       start_period: 10s
     volumes:
       - app_logs:/app/logs
+    # Existing Nginx/Prometheus configs use api; keep that DNS name during the
+    # service rename without carrying a second backend container.
     networks:
-      - application
+      application:
+        aliases: [api]
 
   worker:
     build:
@@ -68,6 +96,7 @@ services:
       APP_ENV: ${APP_ENV:-development}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set}
+      VECTOR_DB_URL: ${VECTOR_DB_URL:-postgresql://${VECTOR_DB_USER:-investment_vectors}:${VECTOR_DB_PASSWORD:-change-me-vector-development-only}@vector-db:5432/${VECTOR_DB_NAME:-investment_vectors}}
       OIDC_ISSUER: ${OIDC_ISSUER:-}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
       OIDC_JWKS_URL: ${OIDC_JWKS_URL:-}
@@ -76,9 +105,12 @@ services:
         condition: service_started
       migrate:
         condition: service_completed_successfully
+      vector-db:
+        condition: service_healthy
     networks: [application]
 
   frontend:
+    image: ${FRONTEND_IMAGE:-investment-agent-frontend:local}
     build:
       context: ..
       dockerfile: frontend/Dockerfile
@@ -91,7 +123,7 @@ services:
         NEXT_PUBLIC_DEVELOPMENT_PRINCIPAL_ID: ${NEXT_PUBLIC_DEVELOPMENT_PRINCIPAL_ID:-}
         NEXT_PUBLIC_DEFAULT_WORKSPACE_ID: ${NEXT_PUBLIC_DEFAULT_WORKSPACE_ID:-}
     depends_on:
-      api:
+      backend:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then((response) => { if (!response.ok) process.exit(1); }).catch(() => process.exit(1))"]
@@ -99,11 +131,11 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
-    networks:
-      - application
+    networks: [application]
 
 volumes:
   postgres_data:
+  vector_db_data:
   app_logs:
 
 networks:

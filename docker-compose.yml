@@ -1,0 +1,6 @@
+# Single entry point for local development. Keep service definitions versioned
+# under deploy/ so production overlays and existing runbooks remain stable.
+include:
+  - path: ./deploy/compose.base.yml
+  - path: ./deploy/compose.dev.yml
+

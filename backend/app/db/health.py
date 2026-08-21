@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend.app.core.config import Settings
 from backend.app.db.session import create_database_engine
 
-CURRENT_ALEMBIC_REVISION = "20260818_p3_06"
+CURRENT_ALEMBIC_REVISION = "20260821_p4_01"
 
 
 async def is_database_ready(settings: Settings) -> bool:

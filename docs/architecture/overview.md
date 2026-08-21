@@ -24,19 +24,54 @@ Next.js /scoring ──POST /api/v1/scoring/evaluate──> FastAPI ──> scor
   跨进程恢复机制；临时 header principal 仅用于本地 workspace 隔离测试。每次 Run 都会实际执行
   `Analyst → Validator → Reviewer`：Analyst 与 Reviewer 不可委派，Validator 是不可绕过的
   引用、数值和权限硬门；每个角色的开始/结束/修订上限都会以 `agent.*` 事件持久化。
+- **Research Task 创建器**：`POST /api/v1/research/tasks` 使用严格的 `ResearchTaskSchema` 校验
+  标的、研究类型、时间范围、深度和输出格式，并把这些配置保存到同一条 `agent_runs`；因此新表单
+  不会分叉出另一套执行、取消或 SSE 生命周期。当前输出格式先作为任务配置保存，具体 PDF/PPT
+  渲染仍沿用后续报告导出能力边界。
+- **机构研究报告**：`ReportAgent` 将通过 Validator 的证据结论映射为固定的
+  `Executive Summary`、`Investment Thesis`、`Business Overview`、`Financial Analysis`、
+  `Industry Analysis`、`Competitive Landscape`、`Risk Analysis`、`Valuation`、`Bull Case`、
+  `Bear Case`、`Conclusion` 11 个章节。每个章节至少包含一条带 `data_support`、`analysis` 和
+  `citations` 的报告结论；报告以 `research.report` 事件持久化，并由 Markdown/PDF 导出器读取同一份结构。
+- **第四阶段 Run 工作流接入**：`agent_runs.workflow` 显式区分 `research` 与 `market_debate`，默认值
+  保持旧调用兼容。`market_debate` Run 在同一状态机内写入 `debate.dossier`、`debate.bull`、
+  `debate.bear`、`debate.moderator` 和 `debate.result`，这些事件可通过既有 SSE/`Last-Event-ID` 重放；
+  没有 symbol、模型或公开数据时进入失败边界，不伪造辩论结果。
 - **公开行情快照（开发期）**：当 Run 提供 6 位 A 股代码时，执行器用 AkShare 读取最近最多
   6 个未复权日线数据，并将标的、日期、收盘、涨跌幅、日内区间与成交数据固化为唯一 Citation。
   `research.result` 事件只展示该观测快照及来源；它明确不预测未来走势，数据源不可用会使任务失败，
   不会用问题文本伪造行情结果。
+- **第一阶段公开市场工具**：`backend/app/tools/market_data.py` 提供严格 Pydantic 输入/输出的
+  `market.quote`、`market.valuation`、`market.financials`，由 `ToolRegistry` 统一执行权限、超时
+  和调用次数限制；`POST /api/v1/market/*` 只读暴露这些工具，并保留来源、时间和缺失字段。
+  当前联网 provider 仅完成代码接入与离线替身/API 契约验证，尚未证明所有上游接口的实时可达性。
+- **第二阶段事实底稿**：`backend/app/domain/market_dossier.py` 用固定的行情、估值、财务三项清单
+  顺序调用工具，明确区分 `ready`、`partial`、`missing` 和 `error`，并通过
+  `POST /api/v1/market/dossier` 返回可供后续辩论流程消费的模型无关事实对象。当前尚未接入模型或
+  Agent Run 持久化事件。
+- **第三阶段结构化辩论**：`backend/app/domain/market_debate.py` 复用 `ModelRequest`、OpenAI-compatible
+  `CompletionGateway` 和 `RunUsageLedger`，将同一份 Dossier 依次交给 Bull、Bear、Moderator；Pydantic
+  严格 JSON 与行动性内容红线校验失败即拒绝模型输出。`POST /api/v1/market/debate` 保留非流式
+  API 纵向切片；第四阶段已将同一服务接入 `market_debate` Agent Run 事件链。
 - **确认式 Memory 与恢复**：`agent_memories` 不是自动“长期记忆”。仅当 Reviewer 到达
   `human_review`，任务才进入 `awaiting_confirmation`；人工批准后，最终摘要才按用户与工作区隔离
   写入 Memory，且其只能作为上下文、不能充当引用证据。Worker 将超时作为显式可重试故障并持久化
   重试事件，达到上限或其他失败后保留原问题和事件历史，等待人工调用恢复接口重新入队。
+- **结构化 Memory（Phase 3）**：`backend/app/memory/user_memory.py` 将投资偏好、风险等级、关注行业
+  和历史股票保存为每个 workspace/user 唯一的一行；`research_memory.py` 将研报标题、日期、正文、标的
+  和 `[0, 1]` 置信度保存为可按日期查询的多行记录。两类数据使用 `user_memories` 与
+  `research_memories` 表，迁移同时启用 workspace RLS；它们是显式业务记忆，不会绕过既有的人工确认式
+  `agent_memories` 流程或把研报正文冒充 Citation。
+- **RAG 知识库（Phase 4 本地切片）**：`backend/app/rag/loader.py` 将 PDF、Markdown、HTML、CSV
+  按页/文本切成带来源的 chunks；`embedding.py` 提供离线确定性 embedding 与显式的
+  OpenAI-compatible 适配器；`retriever.py` 执行向量检索、workspace/主体 ACL 过滤和页码引用。
+  无 `document_id` 的 research Run 会先查询 workspace 文档，检索为空才保留原行情/缺口路径。
 - **多 Agent 模型模式**：默认 `AGENT_EXECUTION_MODE=deterministic`，以证据原文生成保守草稿，
   适合离线开发；显式设为 `openai_compatible` 后，Analyst 和 Reviewer 分别使用 `CHAT_MODEL` 与
   `REVIEW_MODEL` 的 OpenAI-compatible 调用，并共享单 Run token/费用上限。该模式需要
   `MODEL_API_KEY`（也兼容已有的 `OPENAI_API_KEY`）；没有接入真实文档检索时，输入证据仍仅为
-  Run 的当前受控来源，不能宣称为完整研报研究。
+  Run 的当前受控来源，不能宣称为完整研报研究。当前本地 RAG 默认使用离线哈希 embedding，
+  仅用于开发和评估，不能据此证明生产语义检索质量。
 - **模型边界（阶段二开发边界）**：`backend/app/models` 提供 `ModelGateway`、OpenAI-compatible
   adapter 和 `LegacyModelAdapter` 回滚路径；Prompt 文件按 ID/版本/SHA 记录，模型调用的 token、费用
   和延迟使用统一 usage 契约。离线测试只使用 mock，不调用付费 provider。
@@ -52,7 +87,7 @@ Next.js /scoring ──POST /api/v1/scoring/evaluate──> FastAPI ──> scor
 
 以下是未来设计方向，不是当前实现：
 
-- 持久化 RAG、向量数据库、研报摄取/解析流水线。
+- 生产级持久化 RAG 索引重建、真实 embedding 质量评估和研报摄取/解析 worker 的云端运行。
 - 认证、授权、租户隔离、审计、速率限制、密钥管理与完整安全运营能力。
 - 生产发布自动化、可观测性平台、成本/模型评估及真实市场数据的可靠性治理。
 

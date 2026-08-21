@@ -27,6 +27,10 @@ def document_evidence(results: list[EvidenceSearchResult]) -> list[DocumentEvide
                     f"page={result.page_number}; block={result.block_id}"
                 ),
                 text=result.text,
+                content=result.content,
+                page=result.page,
+                date=result.date,
+                source_url=result.source_url,
             ),
             filename=result.filename,
             document_version=result.document_version,

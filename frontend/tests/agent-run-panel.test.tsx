@@ -160,6 +160,39 @@ describe("agent run panel", () => {
     expect(screen.getByText("不预测未来走势。")).toBeInTheDocument();
   });
 
+  it("creates a market debate run and renders Bull, Bear, and Moderator events", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({
+        id: "00000000-0000-0000-0000-000000000013",
+        status: "queued",
+        executor_mode: "development_only",
+        workflow: "market_debate",
+        symbol: "600519",
+      }, 202))
+      .mockResolvedValueOnce(response(
+        "id: 1\nevent: debate.bull\ndata: {\"role\":\"bull\",\"core_thesis\":\"估值数据提供支持。\",\"claims\":[{\"text\":\"价格观测已取得。\",\"evidence_refs\":[\"quote.quotes[0].price\"]}]}\n\n"
+        + "id: 2\nevent: debate.bear\ndata: {\"role\":\"bear\",\"core_thesis\":\"财务期间仍需核验。\",\"claims\":[{\"text\":\"报告期较短。\",\"evidence_refs\":[\"financials.report_period\"]}]}\n\n"
+        + "id: 3\nevent: debate.moderator\ndata: {\"consensus\":[\"共享底稿\"],\"disagreements\":[\"数据完整性\"],\"verification_checklist\":[\"补充数据\"],\"data_gaps\":[]}\n\n",
+        200,
+        "text/event-stream",
+      ));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<AgentRunPanel />);
+    await user.selectOptions(screen.getByLabelText("任务类型"), "market_debate");
+    await user.type(screen.getByLabelText("股票代码"), "600519");
+    await user.type(screen.getByLabelText("研究问题"), "整理支持与风险");
+    await user.click(screen.getByRole("button", { name: "启动研究" }));
+
+    expect(await screen.findByRole("region", { name: "市场事实辩论" })).toBeInTheDocument();
+    expect(screen.getByText("Bull：支持因素")).toBeInTheDocument();
+    expect(screen.getByText("Bear：风险与反证")).toBeInTheDocument();
+    expect(screen.getByText("Moderator：共识、分歧与核验")).toBeInTheDocument();
+    const createRequest = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(createRequest.body))).toMatchObject({ workflow: "market_debate", symbol: "600519" });
+  });
+
   it("reconnects after a running snapshot and resumes after the last event", async () => {
     const runId = "00000000-0000-0000-0000-000000000006";
     const fetchMock = vi.fn()

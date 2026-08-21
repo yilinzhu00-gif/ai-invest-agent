@@ -28,6 +28,10 @@ def _result() -> EvidenceSearchResult:
 def test_document_result_preserves_the_exact_version_page_and_block_for_each_claim() -> None:
     evidence = document_evidence([_result()])
 
+    assert evidence[0].citation.content == evidence[0].citation.text
+    assert evidence[0].citation.page == 8
+    assert evidence[0].citation.date is None
+
     payload = document_result_payload(
         summary="已找到直接证据。",
         claims=[ResearchClaim(text="本次交易对价为 10 亿元。", citation_ids=[evidence[0].citation.id])],

@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from prometheus_client import make_asgi_app
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from backend.app.agents.factory import build_completion_gateway
 from backend.app.api.router import build_api_router
 from backend.app.core.config import Settings
 from backend.app.core.errors import (
@@ -16,6 +17,8 @@ from backend.app.core.errors import (
 from backend.app.db.session import dispose_database_engine
 from backend.app.observability.metrics import HTTP_REQUESTS
 from backend.app.security.authentication import build_oidc_jwt_validator
+from backend.app.tools.market_registry import build_market_tool_registry
+from backend.app.tools.data_registry import build_data_tool_registry
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -26,6 +29,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db_engine = None
     app.state.db_session_factory = None
     app.state.agent_run_executor = None
+    app.state.market_tool_registry = build_market_tool_registry()
+    app.state.data_tool_registry = build_data_tool_registry()
+    app.state.market_debate_gateway = build_completion_gateway(current_settings)
     app.state.oidc_validator = None
     if current_settings.app_env == "production":
         assert current_settings.oidc_issuer is not None

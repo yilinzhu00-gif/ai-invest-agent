@@ -1,5 +1,5 @@
 services:
-  api:
+  backend:
     restart: unless-stopped
     environment:
       APP_ENV: production

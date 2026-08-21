@@ -1,14 +1,16 @@
 """Durable Agent Run worker lifecycle, independent of the HTTP process."""
 
 import asyncio
+import json
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from backend.app.agent.events import AgentEventType
 from backend.app.agents.factory import build_research_flow
+from backend.app.agents.report_agent import ReportAgent
 from backend.app.agents.runtime import run_with_runtime
 from backend.app.agents.schemas import (
     AgentRuntime,
     Citation,
-    ResearchMemory,
     ResearchRequest,
     ReviewVerdict,
 )
@@ -19,7 +21,15 @@ from backend.app.domain.agent_runs.document_research import (
     document_result_payload,
     insufficient_evidence_payload,
 )
-from backend.app.domain.agent_runs.flow_observer import PersistedFlowObserver
+from backend.app.domain.agent_runs.flow_observer import (
+    PersistedFlowObserver,
+    persisted_event_emitter,
+)
+from backend.app.domain.agent_runs.institutional_report import ReportGenerationError
+from backend.app.domain.agent_runs.market_debate import (
+    MarketDebateRunError,
+    execute_market_debate_run,
+)
 from backend.app.domain.agent_runs.market_research import (
     market_result_payload,
     market_snapshot_citation,
@@ -30,6 +40,7 @@ from backend.app.domain.agent_runs.service import AgentRunService, DevelopmentPr
 from backend.app.domain.knowledge.repository import DocumentRepository
 from backend.app.domain.knowledge.service import KnowledgeService
 from backend.app.ingestion.parser import DocumentParser
+from backend.app.memory.context import load_memory_context, save_research_memory
 from backend.app.tools.market_snapshot import MarketSnapshotUnavailableError, fetch_market_snapshot
 
 
@@ -91,12 +102,40 @@ async def execute_claimed_agent_run(
                     return "not_claimed"
                 if not await service.is_running(parsed_run_id, principal):
                     return "cancelled"
+                memory_context = await load_memory_context(session, principal, symbol=run.symbol)
+                legacy_memories = await service.list_memory(principal)
+                plan = memory_context.plan(run.question, run.symbol)
+                trace = persisted_event_emitter(service, parsed_run_id, principal)
+                await trace.emit(
+                    AgentEventType.PLANNING_START,
+                    "Planner Agent started",
+                    run_id=parsed_run_id,
+                    metadata={
+                        "question_length": len(run.question),
+                        "workflow": run.workflow,
+                        "steps": list(plan.steps),
+                        "memory_used": list(plan.memory_used),
+                    },
+                )
                 await service.append_event(parsed_run_id, principal, "step.started", {"step": 1})
-                memories = await service.list_memory(principal)
+                if run.workflow == "market_debate":
+                    return await execute_market_debate_run(
+                        run_id=parsed_run_id,
+                        principal=principal,
+                        run=run,
+                        service=service,
+                        settings=settings,
+                    )
                 document_items = []
                 snapshot = None
                 document_id = run.document_id
                 if document_id is not None:
+                    await trace.emit(
+                        AgentEventType.TOOL_CALL_START,
+                        "Evidence search started",
+                        run_id=parsed_run_id,
+                        metadata={"tool": "knowledge_search"},
+                    )
                     results = await KnowledgeService(
                         DocumentRepository(session), DocumentParser()
                     ).search(
@@ -104,6 +143,12 @@ async def execute_claimed_agent_run(
                         query=run.question,
                         document_id=document_id,
                         limit=10,
+                    )
+                    await trace.emit(
+                        AgentEventType.TOOL_CALL_END,
+                        "Evidence search completed",
+                        run_id=parsed_run_id,
+                        metadata={"tool": "knowledge_search", "result_count": len(results)},
                     )
                     document_items = document_evidence(results)
                     if not document_items:
@@ -142,7 +187,7 @@ async def execute_claimed_agent_run(
                     workspace_id=uuid5(NAMESPACE_URL, f"worker-workspace:{workspace_id}"),
                     question=run.question,
                     evidence=evidence,
-                    memory=[ResearchMemory(id=memory.id, content=memory.content) for memory in memories],
+                    memory=memory_context.as_agent_memories(legacy_memories),
                     require_structured_conclusion=document_id is not None,
                 )
                 outcome = await run_with_runtime(
@@ -153,6 +198,35 @@ async def execute_claimed_agent_run(
                     ),
                     request,
                 )
+                await trace.emit(
+                    AgentEventType.REPORT_GENERATE_START,
+                    "Report generation started",
+                    run_id=parsed_run_id,
+                    metadata={"claim_count": len(outcome.draft.claims) if outcome.draft else 0},
+                )
+                report_content: str | None = None
+                if outcome.validation.passed and outcome.draft is not None:
+                    try:
+                        report = ReportAgent().generate(
+                            target=run.target or run.symbol or "Research Target",
+                            draft=outcome.draft,
+                            evidence=evidence,
+                        )
+                    except ReportGenerationError as error:
+                        await service.append_event(
+                            parsed_run_id,
+                            principal,
+                            "research.report_unavailable",
+                            {"reason": str(error)},
+                        )
+                    else:
+                        report_content = json.dumps(report.model_dump(mode="json"), ensure_ascii=False)
+                        await service.append_event(
+                            parsed_run_id,
+                            principal,
+                            "research.report",
+                            report.model_dump(mode="json"),
+                        )
                 if not await service.is_running(parsed_run_id, principal):
                     return "cancelled"
                 await service.append_event(
@@ -201,6 +275,16 @@ async def execute_claimed_agent_run(
                         "research.result",
                         market_result_payload(snapshot, summary),
                     )
+                await save_research_memory(
+                    session,
+                    principal,
+                    run_id=parsed_run_id,
+                    title=f"{run.target or run.symbol or 'Research'} research task",
+                    summary=report_content or summary,
+                    symbol=run.symbol,
+                    research_type=run.research_type,
+                    confidence=1.0 if outcome.verdict is ReviewVerdict.APPROVE else 0.5,
+                )
                 await service.record_assistant_message(parsed_run_id, principal, summary)
                 if outcome.verdict is ReviewVerdict.HUMAN_REVIEW:
                     await service.append_event(
@@ -229,6 +313,15 @@ async def execute_claimed_agent_run(
                 return terminal.status
     except MarketSnapshotUnavailableError as error:
         raise RetryableWorkerError(str(error)) from error
+    except MarketDebateRunError as error:
+        await fail_agent_run(
+            run_id=run_id,
+            workspace_id=workspace_id,
+            principal_id=principal_id,
+            error_code=str(error),
+            settings=settings,
+        )
+        return "failed"
     except TimeoutError as error:
         # The task entrypoint persists the retry transition before broker redelivery.
         raise RetryableWorkerError("run_timeout") from error

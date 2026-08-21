@@ -17,6 +17,18 @@ class Citation(BaseModel):
     source: str = Field(min_length=1, max_length=512)
     locator: str = Field(min_length=1, max_length=512)
     text: str = Field(min_length=1, max_length=20_000)
+    # Canonical evidence fields.  They are optional for backwards-compatible
+    # callers that still construct citations from ``text`` and ``locator``.
+    content: str | None = Field(default=None, max_length=20_000)
+    page: int | None = Field(default=None, ge=1)
+    date: str | None = Field(default=None, max_length=64)
+    source_url: str | None = Field(default=None, max_length=2_048)
+
+    @model_validator(mode="after")
+    def normalize_content(self) -> "Citation":
+        if self.content is None:
+            self.content = self.text
+        return self
 
 
 class ResearchMemory(BaseModel):

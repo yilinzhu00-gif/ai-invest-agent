@@ -12,6 +12,8 @@ from backend.app.db.base import Base
 from backend.app.domain.agent_runs import models as agent_run_models  # noqa: F401
 from backend.app.domain.identity import models as identity_models  # noqa: F401
 from backend.app.domain.knowledge import models as knowledge_models  # noqa: F401
+from backend.app.memory import research_memory as research_memory_models  # noqa: F401
+from backend.app.memory import user_memory as user_memory_models  # noqa: F401
 
 config = context.config
 
